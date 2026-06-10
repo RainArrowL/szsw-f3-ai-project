@@ -40,8 +40,8 @@ def print_banner():
     print("    上市公司年报财务数据获取工具")
     print("    Annual Report Financial Data Fetcher")
     print("=" * 60)
-    print(f"    数据源: deepsearch_data_platform (webapi.cninfo.com.cn)")
-    print(f"    备用数据源: 东方财富网 (免费公开)")
+    print("    数据源: deepsearch_data_platform (webapi.cninfo.com.cn)")
+    print("    备用数据源: 东方财富网 (免费公开)")
     print(f"    输出目录: {config.output_dir}/")
     print("=" * 60)
 
@@ -66,7 +66,7 @@ def input_year_range() -> tuple:
             if start_year < 1990:
                 print("  [警告] 开始年份较早，部分数据可能不完整")
             if end_year > current_year:
-                print(f"  [警告] 截止年份超出当前年份，最新年份数据可能尚未发布")
+                print("  [警告] 截止年份超出当前年份，最新年份数据可能尚未发布")
 
             confirm = input(f"\n  确认年度范围: {start_year} ~ {end_year} 年? (y/n): ").strip().lower()
             if confirm in ("y", "yes", ""):
@@ -229,11 +229,11 @@ def run_interactive():
 
     # 确认开始
     print("\n" + "-" * 40)
-    print(f"将要获取以下数据:")
+    print("将要获取以下数据:")
     print(f"  年度范围: {start_year} ~ {end_year} 年")
     print(f"  企业数量: {len(companies)}")
-    print(f"  报表类型: 资产负债表、利润表、现金流量表")
-    print(f"  输出格式: 每家企业一个Excel文件")
+    print("  报表类型: 资产负债表、利润表、现金流量表")
+    print("  输出格式: 每家企业一个Excel文件")
     print(f"  数据源: {'cninfo API' if use_cninfo else '东方财富(免费)'}")
     print("-" * 40)
 
