@@ -531,3 +531,43 @@ def get_fetcher() -> FinancialDataFetcher:
     if _fetcher is None:
         _fetcher = FinancialDataFetcher()
     return _fetcher
+
+
+# ==================== 企业名称解析（独立函数） ====================
+
+def resolve_companies(companies: list) -> list:
+    """
+    解析企业名单，返回 (股票代码, 公司名称) 列表
+
+    自动识别：
+    - 纯数字 -> 股票代码
+    - 非纯数字 -> 公司名称（搜索获取代码）
+    """
+    fetcher = FinancialDataFetcher()
+    resolved = []
+
+    for item in companies:
+        # 如果是纯数字/字母，视为股票代码
+        if item.replace(".", "").replace("-", "").replace(" ", "").isalnum() and any(c.isdigit() for c in item):
+            # 去掉后缀如 .SH .SZ
+            code = item.split(".")[0].split("-")[0].strip()
+            # 尝试搜索确认存在
+            try:
+                results = fetcher.get_stock_info(code)
+                if results:
+                    resolved.append((results[0]["code"], results[0]["name"]))
+                else:
+                    resolved.append((code, code))
+            except Exception:
+                resolved.append((code, code))
+        else:
+            # 视为公司名称
+            try:
+                results = fetcher.get_stock_info(item)
+                if results:
+                    best = results[0]
+                    resolved.append((best["code"], best["name"]))
+            except Exception:
+                pass  # 跳过无法识别的
+
+    return resolved

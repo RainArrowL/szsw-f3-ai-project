@@ -20,7 +20,7 @@ from datetime import datetime
 
 from config import config
 from cninfo_api import get_api
-from cninfo_fin_data import FinancialDataFetcher, REPORT_NAMES_CN
+from cninfo_fin_data import FinancialDataFetcher, REPORT_NAMES_CN, resolve_companies
 from excel_writer import write_all_companies
 
 # 日志配置
@@ -140,52 +140,6 @@ def input_company_list() -> list:
             return companies
 
         print("  请重新输入企业名单")
-
-
-def resolve_companies(companies: list) -> list:
-    """
-    解析企业名单，返回 (股票代码, 公司名称) 列表
-
-    自动识别：
-    - 纯数字 -> 股票代码
-    - 非纯数字 -> 公司名称（需要搜索获取代码）
-    """
-    fetcher = FinancialDataFetcher()
-    resolved = []
-
-    for item in companies:
-        # 如果是纯数字/字母，视为股票代码
-        if item.replace(".", "").replace("-", "").isalnum() and any(c.isdigit() for c in item):
-            # 去掉后缀如 .SH .SZ
-            code = item.split(".")[0].split("-")[0].strip()
-            # 尝试搜索确认存在
-            try:
-                results = fetcher.get_stock_info(code)
-                if results:
-                    resolved.append((results[0]["code"], results[0]["name"]))
-                    print(f"  [{item}] -> {results[0]['code']} {results[0]['name']}")
-                else:
-                    # 直接使用输入的代码
-                    resolved.append((code, code))
-                    print(f"  [{item}] -> {code} (未搜索到名称，使用代码)")
-            except Exception:
-                resolved.append((code, code))
-                print(f"  [{item}] -> {code}")
-        else:
-            # 视为公司名称，需要搜索
-            try:
-                print(f"  正在搜索: {item}...")
-                results = fetcher.get_stock_info(item)
-                if results:
-                    best = results[0]
-                    resolved.append((best["code"], best["name"]))
-                    print(f"  [{item}] -> {best['code']} {best['name']}")
-                else:
-                    print(f"  [警告] 未找到 '{item}'，已跳过")
-            except Exception as e:
-                print(f"  [警告] 搜索 '{item}' 失败({e})，已跳过")
-
-    return resolved
 
 
 def check_credentials():
