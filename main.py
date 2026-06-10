@@ -21,7 +21,8 @@ from datetime import datetime
 from config import config
 from cninfo_api import get_api
 from cninfo_fin_data import FinancialDataFetcher, REPORT_NAMES_CN, resolve_companies
-from excel_writer import write_all_companies
+from excel_writer import write_company_excel
+from industry_avg import compute_all_industry_averages, get_company_industry
 
 # 日志配置
 logging.basicConfig(
@@ -219,12 +220,36 @@ def run_interactive():
     )
     print()  # 换行
 
+    # 计算行业平均值
+    print("\n" + "=" * 60)
+    print("正在计算行业平均值...")
+    print("=" * 60)
+    industry_avgs_map = {}
+    for display_name, (code, _) in zip(all_data.keys(), companies):
+        try:
+            ind = get_company_industry(code)
+            if ind and ind[1]:
+                ind_code, ind_name = ind
+                print(f"  计算 [{display_name}] 的 [{ind_name}] 行业均值...")
+                ia = compute_all_industry_averages(
+                    stock_code=code,
+                    ind_name=ind_name,
+                    ind_code=ind_code,
+                    start_year=start_year,
+                    end_year=end_year,
+                )
+                industry_avgs_map[display_name] = ia
+                total_sheets = sum(len(ia.get(k, {})) for k in ia)
+                print(f"    -> 行业 [{ind_name}], 共 {len(ia)} 项报表, {total_sheets} 个年度")
+        except Exception as e:
+            print(f"  跳过 [{display_name}] 行业平均值: {e}")
+
     # 写入Excel
     print("\n" + "=" * 60)
     print("正在写入Excel文件...")
     print("=" * 60)
 
-    files = write_all_companies(all_data, progress_callback=show_progress)
+    files = write_all_companies(all_data, progress_callback=show_progress, industry_avgs_map=industry_avgs_map)
     print()
 
     # 完成
@@ -265,7 +290,22 @@ def run_quick_mode(companies_str: str, start_year: int, end_year: int):
     fetcher.set_use_cninfo(use_cninfo)
 
     all_data = fetcher.fetch_multiple_companies(companies, start_year, end_year)
-    files = write_all_companies(all_data)
+
+    # 计算行业平均值
+    print(f"\n正在计算行业平均值...")
+    industry_avgs_map = {}
+    for display_name, (code, _) in zip(all_data.keys(), companies):
+        try:
+            ind = get_company_industry(code)
+            if ind and ind[1]:
+                ind_code, ind_name = ind
+                print(f"  计算 [{display_name}] [{ind_name}] 行业均值...")
+                ia = compute_all_industry_averages(code, ind_name, ind_code, start_year, end_year)
+                industry_avgs_map[display_name] = ia
+        except Exception as e:
+            print(f"  跳过 [{display_name}]: {e}")
+
+    files = write_all_companies(all_data, industry_avgs_map=industry_avgs_map)
 
     print(f"\n完成! 生成 {len(files)} 个文件")
     for f in files:

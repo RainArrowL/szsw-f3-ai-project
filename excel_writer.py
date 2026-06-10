@@ -126,6 +126,7 @@ def write_company_excel(
     company_name: str,
     financial_data: Dict[str, List[Dict[str, Any]]],
     output_dir: str = None,
+    industry_avg: Dict[str, Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
     """
     将单个公司的财务数据写入Excel
@@ -215,6 +216,42 @@ def write_company_excel(
             # 格式化
             _format_sheet(ws, headers, len(headers), len(year_records))
 
+    # 行业平均值（写在所有企业数据 sheet 之后）
+    if industry_avg:
+        for ia_label, ia_data in industry_avg.items():
+            if not ia_data:
+                continue
+
+            # ia_data 格式: {"2023": [{...}], "2022": [{...}]}
+            for year in sorted(ia_data.keys(), reverse=True):
+                year_records = ia_data[year]
+                if not year_records:
+                    continue
+
+                sheet_title = f"{ia_label}_{year}年"
+                if len(sheet_title) > 31:
+                    sheet_title = f"IAV_{ia_label[-4:]}_{year}"[:31]
+
+                ws = wb.create_sheet(title=sheet_title)
+
+                # 收集字段
+                headers = []
+                seen = set()
+                for record in year_records:
+                    for key in record:
+                        if key not in seen:
+                            headers.append(key)
+                            seen.add(key)
+
+                for col_idx, header in enumerate(headers, 1):
+                    ws.cell(row=1, column=col_idx, value=header)
+
+                for row_idx, record in enumerate(year_records, 2):
+                    for col_idx, header in enumerate(headers, 1):
+                        ws.cell(row=row_idx, column=col_idx, value=record.get(header, ""))
+
+                _format_sheet(ws, headers, len(headers), len(year_records))
+
     wb.save(filepath)
     logger.info(f"Excel已保存: {filepath}")
     return filepath
@@ -224,6 +261,7 @@ def write_all_companies(
     all_data: Dict[str, Dict[str, List[Dict[str, Any]]]],
     output_dir: str = None,
     progress_callback=None,
+    industry_avgs_map: Dict[str, Dict] = None,
 ) -> List[str]:
     """
     批量写入所有公司的Excel文件
@@ -232,6 +270,7 @@ def write_all_companies(
         all_data: 所有公司的财务数据
         output_dir: 输出目录
         progress_callback: 进度回调
+        industry_avgs_map: 行业平均值映射 {公司名: 行业平均值数据}
 
     返回:
         生成的文件路径列表
@@ -248,7 +287,8 @@ def write_all_companies(
         if progress_callback:
             progress_callback(idx + 1, total, f"正在写入: {company_name}")
 
-        filepath = write_company_excel(company_name, data, output_dir)
+        ia = (industry_avgs_map or {}).get(company_name)
+        filepath = write_company_excel(company_name, data, output_dir, industry_avg=ia)
         files.append(filepath)
 
     return files

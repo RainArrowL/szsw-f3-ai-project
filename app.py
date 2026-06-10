@@ -20,6 +20,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 from config import config
 from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel
+from industry_avg import compute_all_industry_averages, get_company_industry
 
 # 日志配置
 logging.basicConfig(
@@ -111,8 +112,25 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             # 获取数据
             data = fetcher.fetch_company_data(code, start_year, end_year)
 
-            # 写入Excel
-            filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
+            # 计算行业平均值
+            industry_avg = None
+            try:
+                ind = get_company_industry(code)
+                if ind and ind[1]:
+                    ind_code, ind_name = ind
+                    logger.info(f"计算 [{ind_name}] 行业均值...")
+                    industry_avg = compute_all_industry_averages(
+                        stock_code=code,
+                        ind_name=ind_name,
+                        ind_code=ind_code,
+                        start_year=start_year,
+                        end_year=end_year,
+                    )
+            except Exception as e:
+                logger.warning(f"计算行业均值失败({code}): {e}")
+
+            # 写入Excel（包含行业平均 sheet）
+            filepath = write_company_excel(company_display, data, output_dir=config.output_dir, industry_avg=industry_avg)
 
             # 记录结果文件
             file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
