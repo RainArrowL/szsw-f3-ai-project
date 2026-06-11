@@ -32,6 +32,7 @@ const uploadContent = document.querySelector('.upload-content');
 const uploadHint = document.querySelector('.upload-hint');
 
 const industryAvgToggle = document.getElementById('industryAvgToggle');
+const amacToggle = document.getElementById('amacToggle');
 
 // 默认企业名单
 const DEFAULT_COMPANIES = `平安银行股份有限公司
@@ -166,6 +167,7 @@ fetchForm.addEventListener('submit', async (e) => {
         formData.append('file', file);
     }
     formData.append('industry_avg', industryAvgToggle.checked ? '1' : '0');
+    formData.append('amac_list', amacToggle.checked ? '1' : '0');
 
     // 显示结果区域
     showResultCard('processing');
@@ -345,6 +347,7 @@ resetBtn.addEventListener('click', () => {
     textInput.value = DEFAULT_COMPANIES;
     removeFile();
     industryAvgToggle.checked = false;
+    amacToggle.checked = false;
     resultCard.style.display = 'none';
     // 重置年份默认值
     const currentYear = new Date().getFullYear();

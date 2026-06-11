@@ -141,6 +141,20 @@
                 <p class="toggle-hint">勾选后，将单独输出一个同行业各企业均值的Excel文件</p>
             </div>
 
+            <!-- 公募基金管理人名录开关 -->
+            <div class="form-section">
+                <div class="toggle-row">
+                    <label class="toggle-label" for="amacToggle">
+                        <span class="toggle-text">获取公募基金管理人名录</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="amacToggle" name="amac_list">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <p class="toggle-hint">勾选后，将从中国证券投资基金业协会爬取公募基金管理人名录（约165家），单独输出Excel</p>
+            </div>
+
             <!-- 按钮 -->
             <div class="form-actions">
                 <button type="submit" class="btn-primary" id="submitBtn">

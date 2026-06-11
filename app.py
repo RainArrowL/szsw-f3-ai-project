@@ -21,6 +21,7 @@ from config import config
 from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel, write_industry_avg_excel
 from industry_avg import compute_all_industry_averages, get_company_industry
+from amac_scraper import fetch_fund_manager_list, write_amac_excel
 
 # 日志配置
 logging.basicConfig(
@@ -74,7 +75,7 @@ def parse_companies_from_text(text: str) -> List[str]:
 
 # ==================== 后台任务 ====================
 
-def process_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str], industry_avg_enabled: bool = False):
+def process_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str], industry_avg_enabled: bool = False, amac_list_enabled: bool = False):
     """
     后台线程执行数据获取任务
     """
@@ -172,6 +173,24 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
                         'display_name': f"行业均值_{safe_ind}_年报财务数据.xlsx",
                     })
 
+        # 如果开启了公募基金管理人名录
+        if amac_list_enabled:
+            task['progress']['message'] = "正在爬取公募基金管理人名录..."
+            logger.info(f"任务 {task_id}: 开始爬取公募基金管理人名录")
+
+            amac_records = fetch_fund_manager_list()
+            if amac_records:
+                amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
+                file_size = os.path.getsize(amac_filepath) if os.path.exists(amac_filepath) else 0
+                task['files'].append({
+                    'name': os.path.basename(amac_filepath),
+                    'path': amac_filepath,
+                    'size': file_size,
+                    'display_name': f"公募基金管理人名录.xlsx",
+                })
+            else:
+                logger.warning(f"任务 {task_id}: 公募基金管理人名录爬取失败")
+
         task['status'] = 'done'
         task['progress']['message'] = f"完成! 共生成 {len(task['files'])} 个文件"
         logger.info(f"任务 {task_id} 完成: {len(task['files'])} 个文件")
@@ -237,6 +256,8 @@ def fetch_data():
 
     # 是否计算行业均值
     industry_avg_enabled = request.form.get('industry_avg', '0') == '1'
+    # 是否爬取公募基金管理人名录
+    amac_list_enabled = request.form.get('amac_list', '0') == '1'
 
     # 创建任务
     task_id = str(uuid.uuid4())[:8]
@@ -259,7 +280,7 @@ def fetch_data():
     # 启动后台线程
     thread = threading.Thread(
         target=process_task,
-        args=(task_id, start_year, end_year, companies, industry_avg_enabled),
+        args=(task_id, start_year, end_year, companies, industry_avg_enabled, amac_list_enabled),
         daemon=True
     )
     thread.start()
