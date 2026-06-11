@@ -19,7 +19,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 
 from config import config
 from cninfo_fin_data import FinancialDataFetcher, resolve_companies
-from excel_writer import write_company_excel
+from excel_writer import write_company_excel, write_industry_avg_excel
 from industry_avg import compute_all_industry_averages, get_company_industry
 
 # 日志配置
@@ -74,7 +74,7 @@ def parse_companies_from_text(text: str) -> List[str]:
 
 # ==================== 后台任务 ====================
 
-def process_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str]):
+def process_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str], industry_avg_enabled: bool = False):
     """
     后台线程执行数据获取任务
     """
@@ -88,7 +88,6 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
 
     try:
         fetcher = FinancialDataFetcher()
-        # 如果配置了cninfo凭证则使用
         fetcher.set_use_cninfo(config.is_credential_set())
 
         # 解析企业信息
@@ -101,6 +100,7 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
         total = len(resolved)
         task['progress']['total'] = total
 
+        # 获取各企业自身数据
         for idx, (code, name) in enumerate(resolved):
             current = idx + 1
             company_display = f"{name}({code})"
@@ -109,30 +109,11 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
 
             logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
 
-            # 获取数据
             data = fetcher.fetch_company_data(code, start_year, end_year)
 
-            # 计算行业平均值
-            industry_avg = None
-            try:
-                ind = get_company_industry(code)
-                if ind and ind[1]:
-                    ind_code, ind_name = ind
-                    logger.info(f"计算 [{ind_name}] 行业均值...")
-                    industry_avg = compute_all_industry_averages(
-                        stock_code=code,
-                        ind_name=ind_name,
-                        ind_code=ind_code,
-                        start_year=start_year,
-                        end_year=end_year,
-                    )
-            except Exception as e:
-                logger.warning(f"计算行业均值失败({code}): {e}")
+            # 写入Excel（企业自身数据，不含行业均值）
+            filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
 
-            # 写入Excel（包含行业平均 sheet）
-            filepath = write_company_excel(company_display, data, output_dir=config.output_dir, industry_avg=industry_avg)
-
-            # 记录结果文件
             file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
             task['files'].append({
                 'name': os.path.basename(filepath),
@@ -142,6 +123,54 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             })
 
             time.sleep(0.5)
+
+        # 如果开启了行业均值，计算并输出到单独Excel
+        if industry_avg_enabled:
+            task['progress']['message'] = "正在计算行业平均值..."
+            logger.info(f"任务 {task_id}: 开始计算行业平均值")
+
+            # 收集各企业的行业信息，按行业去重
+            industry_map: Dict[str, Tuple[str, str, List[str]]] = {}  # ind_name -> (ind_code, ind_name, [codes])
+
+            for code, name in resolved:
+                ind = get_company_industry(code)
+                if ind and ind[1]:
+                    ind_code, ind_name = ind
+                    if ind_name not in industry_map:
+                        industry_map[ind_name] = (ind_code, ind_name, [])
+                    industry_map[ind_name][2].append(code)
+
+            logger.info(f"共 {len(industry_map)} 个不同行业")
+
+            # 为每个行业计算均值并写入一个Excel
+            for ind_name, (ind_code, ind_full_name, codes) in industry_map.items():
+                if not codes:
+                    continue
+                # 取第一个股票代码代表该行业
+                rep_code = codes[0]
+                task['progress']['message'] = f"计算行业均值: {ind_name}"
+
+                industry_avg = compute_all_industry_averages(
+                    stock_code=rep_code,
+                    ind_name=ind_full_name,
+                    ind_code=ind_code,
+                    start_year=start_year,
+                    end_year=end_year,
+                )
+
+                if industry_avg:
+                    # 行业Excel文件名
+                    safe_ind = ind_name.replace("/", "_").replace("\\", "_").replace(":", "_")
+                    ia_filepath = write_industry_avg_excel(
+                        ind_name, industry_avg, output_dir=config.output_dir
+                    )
+                    file_size = os.path.getsize(ia_filepath) if os.path.exists(ia_filepath) else 0
+                    task['files'].append({
+                        'name': os.path.basename(ia_filepath),
+                        'path': ia_filepath,
+                        'size': file_size,
+                        'display_name': f"行业均值_{safe_ind}_年报财务数据.xlsx",
+                    })
 
         task['status'] = 'done'
         task['progress']['message'] = f"完成! 共生成 {len(task['files'])} 个文件"
@@ -206,6 +235,9 @@ def fetch_data():
     if not companies:
         return jsonify({'success': False, 'error': '请输入至少一个企业'}), 400
 
+    # 是否计算行业均值
+    industry_avg_enabled = request.form.get('industry_avg', '0') == '1'
+
     # 创建任务
     task_id = str(uuid.uuid4())[:8]
     tasks[task_id] = {
@@ -227,7 +259,7 @@ def fetch_data():
     # 启动后台线程
     thread = threading.Thread(
         target=process_task,
-        args=(task_id, start_year, end_year, companies),
+        args=(task_id, start_year, end_year, companies, industry_avg_enabled),
         daemon=True
     )
     thread.start()

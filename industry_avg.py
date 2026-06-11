@@ -213,14 +213,14 @@ def compute_industry_averages(
         logger.warning(f"未找到同行业股票，跳过行业均值")
         return {}
 
-    # 去掉目标公司自身
-    peer_codes = [s["code"] for s in same_industry if s["code"] != stock_code]
+    # 包含目标公司自身在内的同行业股票
+    peer_codes = [s["code"] for s in same_industry]
 
     if not peer_codes:
-        logger.warning(f"行业 [{target_ind_name}] 仅包含目标公司自身，无法计算均值")
+        logger.warning(f"行业 [{target_ind_name}] 无公司，跳过均值")
         return {}
 
-    logger.info(f"计算行业均值: {len(peer_codes)} 只同业股票")
+    logger.info(f"计算行业均值: {len(peer_codes)} 只同业股票（含自身）")
 
     # 3. 批量获取同行业公司财务数据（限制50只，避免过于耗时）
     max_peers = 50

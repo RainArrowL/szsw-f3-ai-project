@@ -84,7 +84,16 @@
                     name="text_input"
                     rows="4"
                     placeholder="输入企业名称或股票代码，用逗号或换行分隔&#10;例如：贵州茅台,600519&#10;      平安银行&#10;      000001"
-                ></textarea>
+                >平安银行股份有限公司
+招商银行股份有限公司
+国银金融租赁股份有限公司
+招商证券股份有限公司
+国信证券股份有限公司
+长城证券股份有限公司
+第一创业证券股份有限公司
+中信证券股份有限公司
+中国平安保险（集团）股份有限公司
+阳光保险集团股份有限公司</textarea>
             </div>
 
             <!-- 文件上传 -->
@@ -116,6 +125,20 @@
                         <button type="button" class="file-remove" id="fileRemove">×</button>
                     </div>
                 </div>
+            </div>
+
+            <!-- 行业均值开关 -->
+            <div class="form-section">
+                <div class="toggle-row">
+                    <label class="toggle-label" for="industryAvgToggle">
+                        <span class="toggle-text">输出同行业企业均值</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="industryAvgToggle" name="industry_avg">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <p class="toggle-hint">勾选后，将单独输出一个同行业各企业均值的Excel文件</p>
             </div>
 
             <!-- 按钮 -->

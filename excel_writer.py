@@ -126,7 +126,6 @@ def write_company_excel(
     company_name: str,
     financial_data: Dict[str, List[Dict[str, Any]]],
     output_dir: str = None,
-    industry_avg: Dict[str, Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
     """
     将单个公司的财务数据写入Excel
@@ -216,44 +215,77 @@ def write_company_excel(
             # 格式化
             _format_sheet(ws, headers, len(headers), len(year_records))
 
-    # 行业平均值（写在所有企业数据 sheet 之后）
-    if industry_avg:
-        for ia_label, ia_data in industry_avg.items():
-            if not ia_data:
-                continue
-
-            # ia_data 格式: {"2023": [{...}], "2022": [{...}]}
-            for year in sorted(ia_data.keys(), reverse=True):
-                year_records = ia_data[year]
-                if not year_records:
-                    continue
-
-                sheet_title = f"{ia_label}_{year}年"
-                if len(sheet_title) > 31:
-                    sheet_title = f"IAV_{ia_label[-4:]}_{year}"[:31]
-
-                ws = wb.create_sheet(title=sheet_title)
-
-                # 收集字段
-                headers = []
-                seen = set()
-                for record in year_records:
-                    for key in record:
-                        if key not in seen:
-                            headers.append(key)
-                            seen.add(key)
-
-                for col_idx, header in enumerate(headers, 1):
-                    ws.cell(row=1, column=col_idx, value=header)
-
-                for row_idx, record in enumerate(year_records, 2):
-                    for col_idx, header in enumerate(headers, 1):
-                        ws.cell(row=row_idx, column=col_idx, value=record.get(header, ""))
-
-                _format_sheet(ws, headers, len(headers), len(year_records))
-
     wb.save(filepath)
     logger.info(f"Excel已保存: {filepath}")
+    return filepath
+
+
+def write_industry_avg_excel(
+    industry_name: str,
+    industry_avg: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    output_dir: str = None,
+) -> str:
+    """
+    将行业平均值写入单独的Excel文件
+
+    参数：
+        industry_name: 行业名称
+        industry_avg: 行业均值数据 {"行业均值_资产负债表": {"2023": [...]}, ...}
+        output_dir: 输出目录
+
+    返回：
+        文件路径
+    """
+    if output_dir is None:
+        output_dir = config.output_dir
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    safe_name = industry_name.replace("/", "_").replace("\\", "_").replace(":", "_")
+    filepath = os.path.join(output_dir, f"行业均值_{safe_name}_年报财务数据.xlsx")
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    for ia_label, ia_data in industry_avg.items():
+        if not ia_data:
+            # 空sheet
+            ws = wb.create_sheet(title=f"{ia_label}(无数据)")
+            ws.cell(row=1, column=1, value="暂无数据")
+            continue
+
+        for year in sorted(ia_data.keys(), reverse=True):
+            year_records = ia_data[year]
+            if not year_records:
+                continue
+
+            sheet_title = f"{ia_label}_{year}年"
+            if len(sheet_title) > 31:
+                # 截短：行业均值_BS_2023年，保留关键信息
+                short_label = ia_label.replace("行业均值_", "均值_").replace("资产负债表", "BS").replace("利润表", "PL").replace("现金流量表", "CF")
+                sheet_title = f"{short_label}_{year}年"[:31]
+
+            ws = wb.create_sheet(title=sheet_title)
+
+            headers = []
+            seen = set()
+            for record in year_records:
+                for key in record:
+                    if key not in seen:
+                        headers.append(key)
+                        seen.add(key)
+
+            for col_idx, header in enumerate(headers, 1):
+                ws.cell(row=1, column=col_idx, value=header)
+
+            for row_idx, record in enumerate(year_records, 2):
+                for col_idx, header in enumerate(headers, 1):
+                    ws.cell(row=row_idx, column=col_idx, value=record.get(header, ""))
+
+            _format_sheet(ws, headers, len(headers), len(year_records))
+
+    wb.save(filepath)
+    logger.info(f"行业均值Excel已保存: {filepath}")
     return filepath
 
 
@@ -287,8 +319,7 @@ def write_all_companies(
         if progress_callback:
             progress_callback(idx + 1, total, f"正在写入: {company_name}")
 
-        ia = (industry_avgs_map or {}).get(company_name)
-        filepath = write_company_excel(company_name, data, output_dir, industry_avg=ia)
+        filepath = write_company_excel(company_name, data, output_dir)
         files.append(filepath)
 
     return files

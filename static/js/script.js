@@ -31,6 +31,20 @@ const fileListEl = document.getElementById('fileList');
 const uploadContent = document.querySelector('.upload-content');
 const uploadHint = document.querySelector('.upload-hint');
 
+const industryAvgToggle = document.getElementById('industryAvgToggle');
+
+// 默认企业名单
+const DEFAULT_COMPANIES = `平安银行股份有限公司
+招商银行股份有限公司
+国银金融租赁股份有限公司
+招商证券股份有限公司
+国信证券股份有限公司
+长城证券股份有限公司
+第一创业证券股份有限公司
+中信证券股份有限公司
+中国平安保险（集团）股份有限公司
+阳光保险集团股份有限公司`;
+
 // ==================== 初始化 ====================
 
 /**
@@ -151,6 +165,7 @@ fetchForm.addEventListener('submit', async (e) => {
     if (file) {
         formData.append('file', file);
     }
+    formData.append('industry_avg', industryAvgToggle.checked ? '1' : '0');
 
     // 显示结果区域
     showResultCard('processing');
@@ -327,8 +342,9 @@ function escapeHtml(text) {
 
 resetBtn.addEventListener('click', () => {
     fetchForm.reset();
-    textInput.value = '';
+    textInput.value = DEFAULT_COMPANIES;
     removeFile();
+    industryAvgToggle.checked = false;
     resultCard.style.display = 'none';
     // 重置年份默认值
     const currentYear = new Date().getFullYear();
