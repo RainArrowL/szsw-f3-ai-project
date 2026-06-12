@@ -288,6 +288,7 @@ def _parse_dividend_record(item: Dict) -> Optional[Dict]:
             "TOTAL_AMOUNT": round(total_amount, 2),
             "TOTAL_SHARES": int(total_shares),  # 总股本（用于后续计算AH拆分）
             "REPORT_TYPE": _report_type(item.get("REPORT_DATE", "")),  # 年报/中报
+            "REPORT_YEAR": _report_year(item.get("REPORT_DATE", "")),  # 报告年度
             "PLAN_STATUS": str(plan_status).strip(),
             "REPORT_PERIOD": item.get("REPORT_DATE", ""),
             "IMPL_PLAN_PROFILE": item.get("IMPL_PLAN_PROFILE", ""),
@@ -336,6 +337,16 @@ def _report_type(report_date: str) -> str:
     return ""
 
 
+def _report_year(report_date: str) -> str:
+    """根据报告期提取报告年度"""
+    if not report_date:
+        return ""
+    dt = _normalize_date(report_date)
+    if dt:
+        return dt[:4]
+    return ""
+
+
 def write_dividend_excel(
     records: List[Dict],
     start_year: int,
@@ -374,7 +385,7 @@ def write_dividend_excel(
     )
 
     # 标题行
-    ws.merge_cells("A1:J1")
+    ws.merge_cells("A1:K1")
     title_cell = ws["A1"]
     title_cell.value = f"{start_year}-{end_year}年 上市公司分红公告"
     title_cell.font = Font(name="微软雅黑", size=14, bold=True, color="8E44AD")
@@ -382,7 +393,7 @@ def write_dividend_excel(
     ws.row_dimensions[1].height = 36
 
     # 表头
-    headers = ["股票代码", "股票名称", "公告日", "报告类型", "股权登记日", "现金红利发放日", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
+    headers = ["股票代码", "股票名称", "公告日", "报告年度", "报告类型", "股权登记日", "现金红利发放日", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_idx, value=header)
         cell.font = header_font
@@ -409,11 +420,11 @@ def write_dividend_excel(
         name = recs[0].get("SECURITY_NAME", "") if recs else ""
 
         # 分组标题行
-        ws.merge_cells(f"A{current_row}:J{current_row}")
+        ws.merge_cells(f"A{current_row}:K{current_row}")
         group_cell = ws.cell(row=current_row, column=1, value=f"{code}  {name}  ({len(recs)}条)")
         group_cell.font = group_font
         group_cell.fill = group_fill
-        for c in range(1, 11):
+        for c in range(1, 12):
             ws.cell(row=current_row, column=c).border = thin_border
         ws.row_dimensions[current_row].height = 22
         current_row += 1
@@ -428,30 +439,33 @@ def write_dividend_excel(
             ws.cell(row=current_row, column=3, value=rec.get("NOTICE_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=3).border = thin_border
 
-            ws.cell(row=current_row, column=4, value=rec.get("REPORT_TYPE", "")).alignment = cell_alignment
+            ws.cell(row=current_row, column=4, value=rec.get("REPORT_YEAR", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=4).border = thin_border
 
-            ws.cell(row=current_row, column=5, value=rec.get("REGIST_DATE", "")).alignment = cell_alignment
+            ws.cell(row=current_row, column=5, value=rec.get("REPORT_TYPE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=5).border = thin_border
 
-            ws.cell(row=current_row, column=6, value=rec.get("PAYMENT_DATE", "")).alignment = cell_alignment
+            ws.cell(row=current_row, column=6, value=rec.get("REGIST_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=6).border = thin_border
 
-            ws.cell(row=current_row, column=7, value=rec.get("CASH_DIVIDEND_PER_SHARE", 0)).alignment = cell_alignment
-            ws.cell(row=current_row, column=7).number_format = "#,##0.0000"
+            ws.cell(row=current_row, column=7, value=rec.get("PAYMENT_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=7).border = thin_border
 
-            ws.cell(row=current_row, column=8, value=rec.get("TOTAL_AMOUNT", 0)).alignment = cell_alignment
-            ws.cell(row=current_row, column=8).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=8, value=rec.get("CASH_DIVIDEND_PER_SHARE", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=8).number_format = "#,##0.0000"
             ws.cell(row=current_row, column=8).border = thin_border
 
-            ws.cell(row=current_row, column=9, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=9, value=rec.get("TOTAL_AMOUNT", 0)).alignment = cell_alignment
             ws.cell(row=current_row, column=9).number_format = "#,##0.00"
             ws.cell(row=current_row, column=9).border = thin_border
 
-            ws.cell(row=current_row, column=10, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=10, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
             ws.cell(row=current_row, column=10).number_format = "#,##0.00"
             ws.cell(row=current_row, column=10).border = thin_border
+
+            ws.cell(row=current_row, column=11, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=11).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=11).border = thin_border
 
             ws.row_dimensions[current_row].height = 20
             current_row += 1
@@ -461,12 +475,13 @@ def write_dividend_excel(
     ws.column_dimensions["B"].width = 22
     ws.column_dimensions["C"].width = 14
     ws.column_dimensions["D"].width = 10
-    ws.column_dimensions["E"].width = 14
-    ws.column_dimensions["F"].width = 16
-    ws.column_dimensions["G"].width = 14
-    ws.column_dimensions["H"].width = 18
-    ws.column_dimensions["I"].width = 20
+    ws.column_dimensions["E"].width = 10
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 16
+    ws.column_dimensions["H"].width = 14
+    ws.column_dimensions["I"].width = 18
     ws.column_dimensions["J"].width = 20
+    ws.column_dimensions["K"].width = 20
 
     # 冻结
     ws.freeze_panes = "A3"
