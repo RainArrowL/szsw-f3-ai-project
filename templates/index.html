@@ -263,6 +263,101 @@
                     </div>
                 </div>
             </div>
+
+            <!-- ========== 第四列：分红公告查询 ========== -->
+            <div class="module-card" id="dividendModule">
+                <div class="module-header">
+                    <div class="module-icon dividend-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 6v6l4 2"/>
+                        </svg>
+                    </div>
+                    <div class="module-title-area">
+                        <h2 class="module-title">分红公告查询</h2>
+                        <span class="module-badge dividend-badge">现金分红</span>
+                    </div>
+                </div>
+
+                <form id="dividendForm" class="module-form">
+                    <div class="form-row">
+                        <label class="mini-label">年度范围</label>
+                        <div class="year-range-compact">
+                            <select id="dividendStartYear" required>
+                                <option value="">--</option>
+                            </select>
+                            <span class="dash">&mdash;</span>
+                            <select id="dividendEndYear" required>
+                                <option value="">--</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <label class="mini-label">企业名单</label>
+                        <textarea
+                            id="dividendTextInput"
+                            rows="3"
+                            placeholder="输入企业名称或股票代码，用逗号或换行分隔"
+                        >平安银行股份有限公司
+招商银行股份有限公司
+国银金融租赁股份有限公司
+招商证券股份有限公司
+国信证券股份有限公司
+长城证券股份有限公司
+第一创业证券股份有限公司
+中信证券股份有限公司
+中国平安保险（集团）股份有限公司
+阳光保险集团股份有限公司</textarea>
+                    </div>
+
+                    <div class="form-row">
+                        <label class="mini-label">或上传名单</label>
+                        <div class="upload-area" id="dividendUploadArea">
+                            <input type="file" id="dividendFileInput" accept=".txt,.csv">
+                            <div class="upload-content">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <polyline points="12 18 12 12 9 15"/>
+                                    <line x1="12" y1="12" x2="15" y2="15"/>
+                                </svg>
+                                <span>拖拽 .txt/.csv 文件</span>
+                            </div>
+                            <div class="file-info" id="dividendFileInfo" style="display:none;">
+                                <span class="file-name" id="dividendFileName"></span>
+                                <button type="button" class="file-remove" id="dividendFileRemove">&times;</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions dividend-actions">
+                        <button type="submit" class="btn-primary btn-sm" id="dividendSubmitBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            开始获取
+                        </button>
+                    </div>
+                </form>
+
+                <div class="module-result" id="dividendResult" style="display:none;">
+                    <div class="progress-section" id="dividendProgress">
+                        <div class="progress-header">
+                            <span class="progress-label" id="dividendProgressLabel">正在处理...</span>
+                            <span class="progress-percent" id="dividendProgressPercent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="dividendProgressFill"></div>
+                        </div>
+                        <p class="progress-message" id="dividendProgressMessage"></p>
+                    </div>
+                    <div class="result-section" id="dividendResultSection" style="display:none;">
+                        <div class="result-status" id="dividendResultStatus"></div>
+                        <div class="file-list" id="dividendFileList"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

@@ -407,6 +407,132 @@ const szseModule = createTaskModule({
     fileListId: 'szseFileList',
 });
 
+// ==================== 模块4: 分红公告查询 ====================
+
+const dividendStartYearEl = document.getElementById('dividendStartYear');
+const dividendEndYearEl = document.getElementById('dividendEndYear');
+const dividendTextInput = document.getElementById('dividendTextInput');
+const dividendFileInput = document.getElementById('dividendFileInput');
+const dividendUploadArea = document.getElementById('dividendUploadArea');
+const dividendFileInfo = document.getElementById('dividendFileInfo');
+const dividendFileName = document.getElementById('dividendFileName');
+const dividendFileRemove = document.getElementById('dividendFileRemove');
+const dividendUploadContent = document.querySelector('#dividendUploadArea .upload-content');
+
+function initDividendYearSelectors() {
+    const currentYear = new Date().getFullYear();
+    const startYear = 2000;
+
+    for (let y = currentYear; y >= startYear; y--) {
+        const opt1 = document.createElement('option');
+        opt1.value = y;
+        opt1.textContent = y + '年';
+        dividendStartYearEl.appendChild(opt1);
+
+        const opt2 = document.createElement('option');
+        opt2.value = y;
+        opt2.textContent = y + '年';
+        dividendEndYearEl.appendChild(opt2);
+    }
+
+    dividendStartYearEl.value = 2024;
+    dividendEndYearEl.value = 2025;
+}
+
+function validateDividendYearRange() {
+    const start = parseInt(dividendStartYearEl.value);
+    const end = parseInt(dividendEndYearEl.value);
+    if (start && end && start > end) {
+        [dividendStartYearEl.value, dividendEndYearEl.value] = [dividendEndYearEl.value, dividendStartYearEl.value];
+    }
+}
+
+// 分红文件上传处理
+function showDividendFileInfo(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['txt', 'csv'].includes(ext)) {
+        alert('仅支持 .txt 和 .csv 文件');
+        dividendFileInput.value = '';
+        return;
+    }
+    dividendUploadContent.style.display = 'none';
+    dividendFileInfo.style.display = 'flex';
+    dividendFileName.textContent = file.name;
+}
+
+function removeDividendFile() {
+    dividendFileInput.value = '';
+    dividendUploadContent.style.display = '';
+    dividendFileInfo.style.display = 'none';
+}
+
+dividendUploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dividendUploadArea.style.borderColor = 'var(--dividend-accent, #AB47BC)';
+    dividendUploadArea.style.background = 'rgba(171, 71, 188, 0.08)';
+});
+
+dividendUploadArea.addEventListener('dragleave', () => {
+    dividendUploadArea.style.borderColor = '';
+    dividendUploadArea.style.background = '';
+});
+
+dividendUploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dividendUploadArea.style.borderColor = '';
+    dividendUploadArea.style.background = '';
+    const file = e.dataTransfer.files[0];
+    if (file) {
+        dividendFileInput.files = e.dataTransfer.files;
+        showDividendFileInfo(file);
+    }
+});
+
+dividendFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) showDividendFileInfo(file);
+});
+dividendFileRemove.addEventListener('click', removeDividendFile);
+dividendStartYearEl.addEventListener('change', validateDividendYearRange);
+dividendEndYearEl.addEventListener('change', validateDividendYearRange);
+
+const dividendModule = createTaskModule({
+    formId: 'dividendForm',
+    submitBtnId: 'dividendSubmitBtn',
+    apiUrl: '/api/dividend',
+    buildFormData: () => {
+        const startYear = parseInt(dividendStartYearEl.value);
+        const endYear = parseInt(dividendEndYearEl.value);
+        const textVal = dividendTextInput.value.trim();
+        const file = dividendFileInput.files[0];
+
+        if (!startYear || !endYear) {
+            alert('请选择年度范围');
+            return null;
+        }
+        if (!textVal && !file) {
+            alert('请输入企业名单或上传文件');
+            return null;
+        }
+
+        const formData = new FormData();
+        formData.append('start_year', startYear);
+        formData.append('end_year', endYear);
+        formData.append('text_input', textVal);
+        if (file) formData.append('file', file);
+        return formData;
+    },
+    resultId: 'dividendResult',
+    progressId: 'dividendProgress',
+    progressLabelId: 'dividendProgressLabel',
+    progressPercentId: 'dividendProgressPercent',
+    progressFillId: 'dividendProgressFill',
+    progressMessageId: 'dividendProgressMessage',
+    resultSectionId: 'dividendResultSection',
+    resultStatusId: 'dividendResultStatus',
+    fileListId: 'dividendFileList',
+});
+
 // ==================== 工具函数 ====================
 
 function escapeHtml(text) {
@@ -418,6 +544,7 @@ function escapeHtml(text) {
 // ==================== 启动 ====================
 initYearSelectors();
 initSzseYearSelector();
+initDividendYearSelectors();
 
 // 旋转动画样式
 const spinStyle = document.createElement('style');

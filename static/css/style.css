@@ -130,14 +130,20 @@ header h1 {
 /* ===== 三列网格 ===== */
 .modules-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
     flex: 1;
     min-height: 0;
     align-items: start;
 }
 
-@media (max-width: 1100px) {
+@media (min-width: 1300px) {
+    .modules-grid {
+        grid-template-columns: 1fr 1fr 1fr 1fr;
+    }
+}
+
+@media (max-width: 1300px) and (min-width: 901px) {
     .modules-grid {
         grid-template-columns: 1fr 1fr;
     }
@@ -600,6 +606,27 @@ textarea:focus {
 }
 
 .szse-actions {
+    justify-content: center;
+    padding-top: 0;
+}
+
+/* ===== 分红公告模块特有 ===== */
+:root {
+    --dividend-accent: #AB47BC;
+    --dividend-accent-light: rgba(171, 71, 188, 0.15);
+    --dividend-glow: rgba(171, 71, 188, 0.4);
+}
+
+.module-icon.dividend-icon {
+    color: var(--dividend-accent);
+}
+
+.module-badge.dividend-badge {
+    background: var(--dividend-accent-light);
+    color: var(--dividend-accent);
+}
+
+.dividend-actions {
     justify-content: center;
     padding-top: 0;
 }

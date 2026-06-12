@@ -23,6 +23,7 @@ from excel_writer import write_company_excel, write_industry_avg_excel
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
 from szse_scraper import fetch_year_data, write_szse_excel
+from dividend_scraper import fetch_dividend_data, write_dividend_excel
 
 # 日志配置
 logging.basicConfig(
@@ -448,6 +449,117 @@ def fetch_szse():
     thread = threading.Thread(
         target=process_szse_task,
         args=(task_id, year),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
+    })
+
+
+# ==================== 分红公告端点 ====================
+
+def process_dividend_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str]):
+    """
+    后台线程执行分红公告爬取任务
+    """
+    task = tasks[task_id]
+    task['status'] = 'processing'
+
+    try:
+        task['progress']['message'] = "正在解析企业名单..."
+        # 解析企业名单，获取股票代码
+        resolved = resolve_companies(raw_companies)
+        if not resolved:
+            raise ValueError("未能解析任何企业，请检查企业名单")
+
+        stock_codes = [code for code, _ in resolved]
+        task['progress']['total'] = len(stock_codes)
+        task['progress']['message'] = f"共解析 {len(stock_codes)} 家企业，开始获取分红数据..."
+
+        def progress_callback(current, total, message):
+            task['progress']['current'] = current
+            task['progress']['total'] = total
+            task['progress']['message'] = message
+
+        records, not_found = fetch_dividend_data(
+            stock_codes, start_year, end_year, progress_callback=progress_callback
+        )
+
+        if records:
+            filepath = write_dividend_excel(records, start_year, end_year, output_dir=config.output_dir)
+            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+            task['files'].append({
+                'name': os.path.basename(filepath),
+                'path': filepath,
+                'size': file_size,
+                'display_name': f"分红公告_{start_year}-{end_year}年.xlsx",
+            })
+            msg = f"完成! 共获取 {len(records)} 条分红记录"
+            if not_found:
+                msg += f"，未找到分红数据: {', '.join(not_found)}"
+            task['progress']['message'] = msg
+        else:
+            task['progress']['message'] = "未找到符合条件的分红数据"
+
+        task['status'] = 'done'
+        logger.info(f"分红任务 {task_id} 完成: {len(records)} 条记录")
+
+    except Exception as e:
+        task['status'] = 'error'
+        task['error'] = str(e)
+        logger.error(f"分红任务 {task_id} 失败: {e}", exc_info=True)
+
+
+@app.route('/api/dividend', methods=['POST'])
+def fetch_dividend():
+    """提交分红公告爬取任务"""
+    start_year = request.form.get('start_year', type=int)
+    end_year = request.form.get('end_year', type=int)
+
+    if not start_year or not end_year:
+        return jsonify({
+            'success': False,
+            'error': '请选择年份范围'
+        }), 400
+
+    # 获取企业名单
+    text_input = request.form.get('text_input', '').strip()
+    file = request.files.get('file')
+
+    companies = []
+    if text_input:
+        companies = [c.strip() for c in text_input.replace(',', '\n').split('\n') if c.strip()]
+    if file:
+        file_text = file.read().decode('utf-8-sig')
+        file_companies = [c.strip() for c in file_text.replace(',', '\n').split('\n') if c.strip()]
+        companies.extend(file_companies)
+
+    if not companies:
+        return jsonify({
+            'success': False,
+            'error': '请输入企业名单或上传名单文件'
+        }), 400
+
+    task_id = str(uuid.uuid4())[:8]
+    tasks[task_id] = {
+        'id': task_id,
+        'status': 'pending',
+        'progress': {
+            'current': 0,
+            'total': len(companies),
+            'message': '等待开始...',
+        },
+        'files': [],
+        'error': None,
+        'created_at': time.time(),
+    }
+
+    thread = threading.Thread(
+        target=process_dividend_task,
+        args=(task_id, start_year, end_year, companies),
         daemon=True
     )
     thread.start()
