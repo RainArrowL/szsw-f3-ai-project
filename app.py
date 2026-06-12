@@ -22,6 +22,7 @@ from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel, write_industry_avg_excel
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
+from szse_scraper import fetch_year_data, write_szse_excel
 
 # 日志配置
 logging.basicConfig(
@@ -371,6 +372,82 @@ def fetch_amac():
     thread = threading.Thread(
         target=process_amac_task,
         args=(task_id,),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
+    })
+
+
+# ==================== 深交所日度概况端点 ====================
+
+def process_szse_task(task_id: str, year: int):
+    """
+    后台线程执行深交所日度概况爬取任务
+    """
+    task = tasks[task_id]
+    task['status'] = 'processing'
+
+    try:
+        def progress_callback(current, total, message):
+            task['progress']['current'] = current
+            task['progress']['total'] = total
+            task['progress']['message'] = message
+
+        task['progress']['message'] = f"正在爬取 {year} 年深交所日度概况..."
+        logger.info(f"SZSE任务 {task_id}: 开始爬取 {year} 年数据")
+
+        data = fetch_year_data(year, progress_callback=progress_callback)
+
+        if data:
+            filepath = write_szse_excel(year, data, output_dir=config.output_dir)
+            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+            task['files'].append({
+                'name': os.path.basename(filepath),
+                'path': filepath,
+                'size': file_size,
+                'display_name': f"深交所日度概况_{year}年.xlsx",
+            })
+            task['progress']['message'] = f"完成! {year}年共 {len(data)} 个交易日"
+        else:
+            raise ValueError(f"{year}年未获取到任何深交所日度概况数据")
+
+        task['status'] = 'done'
+        logger.info(f"SZSE任务 {task_id} 完成: {len(data)} 条记录")
+
+    except Exception as e:
+        task['status'] = 'error'
+        task['error'] = str(e)
+        logger.error(f"SZSE任务 {task_id} 失败: {e}", exc_info=True)
+
+
+@app.route('/api/szse', methods=['POST'])
+def fetch_szse():
+    """提交深交所日度概况爬取任务"""
+    year = request.form.get('year', type=int)
+    if not year:
+        year = datetime.now().year
+
+    task_id = str(uuid.uuid4())[:8]
+    tasks[task_id] = {
+        'id': task_id,
+        'status': 'pending',
+        'progress': {
+            'current': 0,
+            'total': 260,  # 大约260个交易日
+            'message': '等待开始...',
+        },
+        'files': [],
+        'error': None,
+        'created_at': time.time(),
+    }
+
+    thread = threading.Thread(
+        target=process_szse_task,
+        args=(task_id, year),
         daemon=True
     )
     thread.start()

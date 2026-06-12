@@ -127,14 +127,20 @@ header h1 {
     font-weight: 300;
 }
 
-/* ===== 双列网格 ===== */
+/* ===== 三列网格 ===== */
 .modules-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
     flex: 1;
     min-height: 0;
     align-items: start;
+}
+
+@media (max-width: 1100px) {
+    .modules-grid {
+        grid-template-columns: 1fr 1fr;
+    }
 }
 
 @media (max-width: 900px) {
@@ -529,6 +535,71 @@ textarea:focus {
 }
 
 .amac-actions {
+    justify-content: center;
+    padding-top: 0;
+}
+
+/* ===== SZSE 模块特有 ===== */
+.module-icon.szse-icon {
+    color: #F4A261;
+}
+
+.module-badge.szse-badge {
+    background: rgba(244, 162, 97, 0.15);
+    color: #F4A261;
+}
+
+.szse-hero {
+    padding: 16px 20px;
+    text-align: center;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.szse-icon-large {
+    color: #F4A261;
+    opacity: 0.8;
+    margin-bottom: 8px;
+}
+
+.szse-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 4px;
+}
+
+.szse-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.year-select-single {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s ease;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%238E9BAE'%3E%3Cpath d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+}
+
+.year-select-single:focus {
+    border-color: #F4A261;
+    box-shadow: 0 0 0 3px rgba(244, 162, 97, 0.2);
+}
+
+.szse-actions {
     justify-content: center;
     padding-top: 0;
 }

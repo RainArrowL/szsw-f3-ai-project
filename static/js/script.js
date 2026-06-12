@@ -243,8 +243,8 @@ function initYearSelectors() {
         endYearEl.appendChild(opt2);
     }
 
-    startYearEl.value = currentYear - 4;
-    endYearEl.value = currentYear;
+    startYearEl.value = 2021;
+    endYearEl.value = 2025;
 }
 
 function validateYearRange() {
@@ -350,9 +350,8 @@ document.getElementById('annualResetBtn').addEventListener('click', () => {
     removeFile();
     industryAvgToggle.checked = false;
     document.getElementById('annualResult').style.display = 'none';
-    const currentYear = new Date().getFullYear();
-    startYearEl.value = currentYear - 4;
-    endYearEl.value = currentYear;
+    startYearEl.value = 2021;
+    endYearEl.value = 2025;
 });
 
 // ==================== 模块2: 公募基金管理人名录 ====================
@@ -373,6 +372,41 @@ const amacModule = createTaskModule({
     fileListId: 'amacFileList',
 });
 
+// ==================== 模块3: 深交所日度概况 ====================
+
+const szseYearEl = document.getElementById('szseYear');
+
+function initSzseYearSelector() {
+    const currentYear = new Date().getFullYear();
+    for (let y = currentYear; y >= 2000; y--) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y + '年';
+        szseYearEl.appendChild(opt);
+    }
+    szseYearEl.value = currentYear;
+}
+
+const szseModule = createTaskModule({
+    formId: 'szseForm',
+    submitBtnId: 'szseSubmitBtn',
+    apiUrl: '/api/szse',
+    buildFormData: () => {
+        const formData = new FormData();
+        formData.append('year', szseYearEl.value);
+        return formData;
+    },
+    resultId: 'szseResult',
+    progressId: 'szseProgress',
+    progressLabelId: 'szseProgressLabel',
+    progressPercentId: 'szseProgressPercent',
+    progressFillId: 'szseProgressFill',
+    progressMessageId: 'szseProgressMessage',
+    resultSectionId: 'szseResultSection',
+    resultStatusId: 'szseResultStatus',
+    fileListId: 'szseFileList',
+});
+
 // ==================== 工具函数 ====================
 
 function escapeHtml(text) {
@@ -383,6 +417,7 @@ function escapeHtml(text) {
 
 // ==================== 启动 ====================
 initYearSelectors();
+initSzseYearSelector();
 
 // 旋转动画样式
 const spinStyle = document.createElement('style');
