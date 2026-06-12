@@ -216,26 +216,36 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     """
     将深交所日度概况数据写入Excel文件
 
-    Args:
-        year: 年份
-        data: [(日期, 成交量(亿), 成交金额(亿元)), ...]
-        output_dir: 输出目录
-
-    Returns:
-        生成的Excel文件路径
+    输出格式：
+    - 行：日期（按周分组，每周后插入小计行）
+    - 列：成交量（亿）、成交金额（亿元）、日均成交金额、成交额×0.05%
+    - 日均成交金额仅在每周小计行显示，计算公式：当周成交金额小计 ÷ 当周实际交易日天数
     """
     import os
+    from datetime import date as date_type
+    from collections import OrderedDict
+
     os.makedirs(output_dir, exist_ok=True)
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"{year}年深市日度概况"
 
-    # 样式定义
+    # ---- 样式定义 ----
     header_font = Font(name="微软雅黑", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="1A5276", end_color="1A5276", fill_type="solid")
-    header_alignment = Alignment(horizontal="center", vertical="center")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
     cell_alignment = Alignment(horizontal="center", vertical="center")
+    date_alignment = Alignment(horizontal="center", vertical="center")
+
+    subtotal_font = Font(name="微软雅黑", size=10, bold=True)
+    subtotal_fill = PatternFill(start_color="EBF5FB", end_color="EBF5FB", fill_type="solid")
+    subtotal_alignment = Alignment(horizontal="center", vertical="center")
+
+    summary_font = Font(name="微软雅黑", size=10, bold=True)
+    summary_fill = PatternFill(start_color="D5F5E3", end_color="D5F5E3", fill_type="solid")
+
     thin_border = Border(
         left=Side(style="thin", color="BDC3C7"),
         right=Side(style="thin", color="BDC3C7"),
@@ -243,71 +253,125 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
         bottom=Side(style="thin", color="BDC3C7"),
     )
 
-    # 标题行
-    ws.merge_cells("A1:C1")
+    # ---- 标题行 ----
+    ws.merge_cells("A1:E1")
     title_cell = ws["A1"]
     title_cell.value = f"{year}年 深圳证券交易所 日度概况（深市合计）"
     title_cell.font = Font(name="微软雅黑", size=14, bold=True, color="1A5276")
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 36
 
-    # 表头
-    headers = ["日期", "成交量（亿）", "成交金额（亿元）"]
+    # ---- 表头 ----
+    headers = ["日期", "成交量（亿）", "成交金额（亿元）", "日均成交金额", "成交额×0.05%"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_idx, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_alignment
         cell.border = thin_border
-    ws.row_dimensions[2].height = 24
+    ws.row_dimensions[2].height = 28
 
-    # 数据行
-    for row_idx, (d, vol, amt) in enumerate(data, 3):
-        ws.cell(row=row_idx, column=1, value=d).alignment = cell_alignment
-        ws.cell(row=row_idx, column=1).border = thin_border
+    # ---- 按周分组 ----
+    weeks = OrderedDict()
+    for d_str, vol, amt in data:
+        dt = date_type.fromisoformat(d_str)
+        iso_year, iso_week, _ = dt.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        if week_key not in weeks:
+            weeks[week_key] = []
+        weeks[week_key].append((d_str, vol, amt))
 
-        vol_cell = ws.cell(row=row_idx, column=2, value=vol)
-        vol_cell.alignment = cell_alignment
-        vol_cell.number_format = "#,##0.00"
-        vol_cell.border = thin_border
+    # ---- 写入数据 ----
+    current_row = 3
+    total_vol = 0.0
+    total_amt = 0.0
+    total_days = 0
 
-        amt_cell = ws.cell(row=row_idx, column=3, value=amt)
-        amt_cell.alignment = cell_alignment
-        amt_cell.number_format = "#,##0.00"
-        amt_cell.border = thin_border
+    for week_key, week_data in weeks.items():
+        # 本周数据
+        week_vol = 0.0
+        week_amt = 0.0
+        week_days = len(week_data)
 
-        ws.row_dimensions[row_idx].height = 20
+        for d_str, vol, amt in week_data:
+            fee_005 = round(amt * 0.0005, 2)
 
-    # 列宽
-    ws.column_dimensions["A"].width = 16
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 20
+            ws.cell(row=current_row, column=1, value=d_str).alignment = date_alignment
+            ws.cell(row=current_row, column=1).border = thin_border
 
-    # 汇总行
-    summary_row = len(data) + 3
-    ws.merge_cells(f"A{summary_row}:A{summary_row}")
-    summary_label = ws.cell(row=summary_row, column=1, value=f"共 {len(data)} 个交易日")
-    summary_label.font = Font(name="微软雅黑", size=10, bold=True, color="7F8C8D")
-    summary_label.alignment = Alignment(horizontal="right", vertical="center")
+            ws.cell(row=current_row, column=2, value=vol).alignment = cell_alignment
+            ws.cell(row=current_row, column=2).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=2).border = thin_border
 
-    total_vol = sum(v for _, v, _ in data)
-    total_amt = sum(a for _, _, a in data)
-    avg_vol = total_vol / len(data) if data else 0
-    avg_amt = total_amt / len(data) if data else 0
+            ws.cell(row=current_row, column=3, value=amt).alignment = cell_alignment
+            ws.cell(row=current_row, column=3).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=3).border = thin_border
 
-    ws.cell(row=summary_row + 1, column=1, value="年度合计").font = Font(name="微软雅黑", size=10, bold=True)
-    ws.cell(row=summary_row + 1, column=1).alignment = Alignment(horizontal="right", vertical="center")
-    ws.cell(row=summary_row + 1, column=2, value=round(total_vol, 2)).number_format = "#,##0.00"
-    ws.cell(row=summary_row + 1, column=3, value=round(total_amt, 2)).number_format = "#,##0.00"
+            # 日均成交金额：每日行留空
+            ws.cell(row=current_row, column=4).alignment = cell_alignment
+            ws.cell(row=current_row, column=4).border = thin_border
 
-    ws.cell(row=summary_row + 2, column=1, value="日均").font = Font(name="微软雅黑", size=10, bold=True)
-    ws.cell(row=summary_row + 2, column=1).alignment = Alignment(horizontal="right", vertical="center")
-    ws.cell(row=summary_row + 2, column=2, value=round(avg_vol, 2)).number_format = "#,##0.00"
-    ws.cell(row=summary_row + 2, column=3, value=round(avg_amt, 2)).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=5, value=fee_005).alignment = cell_alignment
+            ws.cell(row=current_row, column=5).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=5).border = thin_border
 
-    for r in range(summary_row, summary_row + 3):
-        for c in range(1, 4):
-            ws.cell(row=r, column=c).border = thin_border
+            ws.row_dimensions[current_row].height = 20
+
+            week_vol += vol
+            week_amt += amt
+            current_row += 1
+
+        # ---- 本周小计行 ----
+        avg_daily_amt = round(week_amt / week_days, 2) if week_days > 0 else 0
+        fee_005_sub = round(week_amt * 0.0005, 2)
+
+        for col in range(1, 6):
+            ws.cell(row=current_row, column=col).fill = subtotal_fill
+            ws.cell(row=current_row, column=col).font = subtotal_font
+            ws.cell(row=current_row, column=col).alignment = subtotal_alignment
+            ws.cell(row=current_row, column=col).border = thin_border
+
+        ws.cell(row=current_row, column=1, value=f"{week_key} 小计（{week_days}个交易日）")
+
+        ws.cell(row=current_row, column=2, value=round(week_vol, 2)).number_format = "#,##0.00"
+        ws.cell(row=current_row, column=3, value=round(week_amt, 2)).number_format = "#,##0.00"
+        ws.cell(row=current_row, column=4, value=avg_daily_amt).number_format = "#,##0.00"
+        ws.cell(row=current_row, column=5, value=fee_005_sub).number_format = "#,##0.00"
+
+        ws.row_dimensions[current_row].height = 22
+
+        total_vol += week_vol
+        total_amt += week_amt
+        total_days += week_days
+        current_row += 1
+
+    # ---- 年度汇总行 ----
+    current_row += 0  # 不额外空行，紧接最后一周小计
+    year_avg_amt = round(total_amt / total_days, 2) if total_days > 0 else 0
+    year_fee_005 = round(total_amt * 0.0005, 2)
+
+    for col in range(1, 6):
+        ws.cell(row=current_row, column=col).fill = summary_fill
+        ws.cell(row=current_row, column=col).font = summary_font
+        ws.cell(row=current_row, column=col).alignment = subtotal_alignment
+        ws.cell(row=current_row, column=col).border = thin_border
+
+    ws.cell(row=current_row, column=1, value=f"{year}年 合计（{total_days}个交易日）")
+    ws.cell(row=current_row, column=2, value=round(total_vol, 2)).number_format = "#,##0.00"
+    ws.cell(row=current_row, column=3, value=round(total_amt, 2)).number_format = "#,##0.00"
+    ws.cell(row=current_row, column=4, value=year_avg_amt).number_format = "#,##0.00"
+    ws.cell(row=current_row, column=5, value=year_fee_005).number_format = "#,##0.00"
+    ws.row_dimensions[current_row].height = 24
+
+    # ---- 列宽 ----
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["D"].width = 16
+    ws.column_dimensions["E"].width = 16
+
+    # ---- 冻结窗格（冻结标题+表头） ----
+    ws.freeze_panes = "A3"
 
     # 保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
