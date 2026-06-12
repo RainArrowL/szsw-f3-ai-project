@@ -30,6 +30,87 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
+# A股/H股股本缓存
+_share_count_cache: Dict[str, Optional[Tuple[int, int]]] = {}
+
+
+def _get_ah_share_counts(code: str) -> Optional[Tuple[int, int]]:
+    """
+    获取A股/H股股本数量
+
+    通过东方财富行情API获取A股股本，H股股本 = 总股本 - A股股本
+
+    Returns:
+        (a_shares, h_shares) 或 None（无H股）
+    """
+    global _share_count_cache
+    if code in _share_count_cache:
+        return _share_count_cache[code]
+
+    try:
+        # 先检查是否有H股
+        market_prefix = "0" if code.startswith("0") or code.startswith("3") else "1"
+        secid = f"{market_prefix}.{code}"
+
+        # 获取A股行情中的股本信息
+        quote_url = "https://push2.eastmoney.com/api/qt/stock/get"
+        params = {
+            "secid": secid,
+            "fields": "f84,f85",
+            "ut": "fa5fd1943c7b386f172d6893dbbd4e1f",
+        }
+        resp = requests.get(quote_url, params=params, headers=HEADERS, timeout=15)
+        data = resp.json()
+        if not data.get("data"):
+            _share_count_cache[code] = None
+            return None
+
+        total_shares = int(data["data"].get("f84", 0))
+        a_float = int(data["data"].get("f85", 0))
+
+        if total_shares <= 0:
+            _share_count_cache[code] = None
+            return None
+
+        # 检查是否有H股：通过F10基本资料获取H股代码
+        f10_url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+        f10_params = {
+            "reportName": "RPT_F10_ORG_BASICINFO",
+            "columns": "STR_CODEH",
+            "pageNumber": 1,
+            "pageSize": 1,
+            "source": "WEB",
+            "client": "WEB",
+            "filter": f'(SECURITY_CODE="{code}")',
+        }
+        try:
+            f10_resp = requests.get(f10_url, params=f10_params, headers=HEADERS, timeout=15)
+            f10_data = f10_resp.json()
+            if f10_data.get("success") and f10_data.get("result") and f10_data["result"].get("data"):
+                str_codeh = f10_data["result"]["data"][0].get("STR_CODEH", "")
+                if str_codeh:
+                    # 有H股，计算A股/H股股本
+                    # A股股本 ≈ A股流通股本（对于AH股，流通股本≈总A股）
+                    # H股股本 = 总股本 - A股股本
+                    a_shares = a_float
+                    h_shares = total_shares - a_shares
+                    if h_shares > 0:
+                        result = (a_shares, h_shares)
+                        _share_count_cache[code] = result
+                        logger.info(f"  {code}: A股={a_shares:,}, H股={h_shares:,}")
+                        return result
+        except Exception:
+            pass
+
+        # 无H股
+        _share_count_cache[code] = None
+        return None
+
+    except Exception as e:
+        logger.debug(f"获取 {code} AH股本失败: {e}")
+        _share_count_cache[code] = None
+        return None
+
 
 def fetch_dividend_data(
     stock_codes: List[str],
@@ -66,6 +147,25 @@ def fetch_dividend_data(
             logger.warning(f"  {code}: 未获取到分红数据")
 
         time.sleep(0.5)  # 请求间隔
+
+    # 为每条记录补充A股/H股分配金额
+    if progress_callback:
+        progress_callback(0, 0, "正在计算A股/H股分配金额...")
+
+    for record in all_records:
+        code = record["SECURITY_CODE"]
+        per_share = record["CASH_DIVIDEND_PER_SHARE"]
+        total_shares = record.get("TOTAL_SHARES", 0)
+
+        ah_counts = _get_ah_share_counts(code)
+        if ah_counts:
+            a_shares, h_shares = ah_counts
+            record["A_SHARE_AMOUNT"] = round(per_share * a_shares, 2)
+            record["H_SHARE_AMOUNT"] = round(per_share * h_shares, 2)
+        else:
+            # 纯A股公司：A股分配金额 = 总分配金额，H股分配金额 = 0
+            record["A_SHARE_AMOUNT"] = record["TOTAL_AMOUNT"]
+            record["H_SHARE_AMOUNT"] = 0
 
     return all_records, not_found
 
@@ -186,6 +286,7 @@ def _parse_dividend_record(item: Dict) -> Optional[Dict]:
             "PAYMENT_DATE": _normalize_date(item.get("EX_DIVIDEND_DATE", "")),  # 现金红利发放日≈除权除息日
             "CASH_DIVIDEND_PER_SHARE": round(per_share, 4),
             "TOTAL_AMOUNT": round(total_amount, 2),
+            "TOTAL_SHARES": int(total_shares),  # 总股本（用于后续计算AH拆分）
             "PLAN_STATUS": str(plan_status).strip(),
             "REPORT_PERIOD": item.get("REPORT_DATE", ""),
             "IMPL_PLAN_PROFILE": item.get("IMPL_PLAN_PROFILE", ""),
@@ -256,7 +357,7 @@ def write_dividend_excel(
     )
 
     # 标题行
-    ws.merge_cells("A1:G1")
+    ws.merge_cells("A1:I1")
     title_cell = ws["A1"]
     title_cell.value = f"{start_year}-{end_year}年 上市公司分红公告"
     title_cell.font = Font(name="微软雅黑", size=14, bold=True, color="8E44AD")
@@ -264,7 +365,7 @@ def write_dividend_excel(
     ws.row_dimensions[1].height = 36
 
     # 表头
-    headers = ["股票代码", "股票名称", "公告日", "股权登记日", "现金红利发放日", "每股分红(元)", "分配金额(元)"]
+    headers = ["股票代码", "股票名称", "公告日", "股权登记日", "现金红利发放日", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_idx, value=header)
         cell.font = header_font
@@ -291,11 +392,11 @@ def write_dividend_excel(
         name = recs[0].get("SECURITY_NAME", "") if recs else ""
 
         # 分组标题行
-        ws.merge_cells(f"A{current_row}:G{current_row}")
+        ws.merge_cells(f"A{current_row}:I{current_row}")
         group_cell = ws.cell(row=current_row, column=1, value=f"{code}  {name}  ({len(recs)}条)")
         group_cell.font = group_font
         group_cell.fill = group_fill
-        for c in range(1, 8):
+        for c in range(1, 10):
             ws.cell(row=current_row, column=c).border = thin_border
         ws.row_dimensions[current_row].height = 22
         current_row += 1
@@ -324,6 +425,14 @@ def write_dividend_excel(
             ws.cell(row=current_row, column=7).number_format = "#,##0.00"
             ws.cell(row=current_row, column=7).border = thin_border
 
+            ws.cell(row=current_row, column=8, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=8).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=8).border = thin_border
+
+            ws.cell(row=current_row, column=9, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=9).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=9).border = thin_border
+
             ws.row_dimensions[current_row].height = 20
             current_row += 1
 
@@ -335,6 +444,8 @@ def write_dividend_excel(
     ws.column_dimensions["E"].width = 16
     ws.column_dimensions["F"].width = 14
     ws.column_dimensions["G"].width = 18
+    ws.column_dimensions["H"].width = 20
+    ws.column_dimensions["I"].width = 20
 
     # 冻结
     ws.freeze_panes = "A3"
