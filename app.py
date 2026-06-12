@@ -41,9 +41,6 @@ ALLOWED_EXTENSIONS = {'txt', 'csv'}
 
 # 全局任务存储
 tasks: Dict[str, Dict] = {}
-# 单任务锁（避免并发处理）
-processing_lock = threading.Lock()
-is_processing = False
 
 
 # ==================== 工具函数 ====================
@@ -79,11 +76,6 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
     """
     后台线程执行数据获取任务
     """
-    global is_processing
-
-    with processing_lock:
-        is_processing = True
-
     task = tasks[task_id]
     task['status'] = 'processing'
 
@@ -200,10 +192,6 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
         task['error'] = str(e)
         logger.error(f"任务 {task_id} 失败: {e}", exc_info=True)
 
-    finally:
-        with processing_lock:
-            is_processing = False
-
 
 # ==================== 路由 ====================
 
@@ -217,13 +205,6 @@ def index():
 @app.route('/api/fetch', methods=['POST'])
 def fetch_data():
     """提交数据获取任务"""
-    global is_processing
-
-    if is_processing:
-        return jsonify({
-            'success': False,
-            'error': '已有任务正在处理中，请稍候再试'
-        }), 409
 
     # 获取表单数据
     form = request.form
@@ -326,8 +307,77 @@ def get_status():
     """获取服务状态"""
     return jsonify({
         'success': True,
-        'is_processing': is_processing,
         'credential_configured': config.is_credential_set(),
+    })
+
+
+# ==================== AMAC 名录独立端点 ====================
+
+def process_amac_task(task_id: str):
+    """
+    后台线程执行公募基金管理人名录爬取任务
+    """
+    task = tasks[task_id]
+    task['status'] = 'processing'
+
+    try:
+        task['progress']['message'] = "正在爬取公募基金管理人名录..."
+        logger.info(f"AMAC任务 {task_id}: 开始爬取")
+
+        amac_records = fetch_fund_manager_list()
+        if amac_records:
+            amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
+            file_size = os.path.getsize(amac_filepath) if os.path.exists(amac_filepath) else 0
+            task['files'].append({
+                'name': os.path.basename(amac_filepath),
+                'path': amac_filepath,
+                'size': file_size,
+                'display_name': "公募基金管理人名录.xlsx",
+            })
+            task['progress']['total'] = 1
+            task['progress']['current'] = 1
+        else:
+            raise ValueError("公募基金管理人名录爬取失败，未获取到数据")
+
+        task['status'] = 'done'
+        task['progress']['message'] = "完成! 名录已生成"
+        logger.info(f"AMAC任务 {task_id} 完成")
+
+    except Exception as e:
+        task['status'] = 'error'
+        task['error'] = str(e)
+        logger.error(f"AMAC任务 {task_id} 失败: {e}", exc_info=True)
+
+
+@app.route('/api/amac', methods=['POST'])
+def fetch_amac():
+    """提交公募基金管理人名录爬取任务"""
+    # 创建任务
+    task_id = str(uuid.uuid4())[:8]
+    tasks[task_id] = {
+        'id': task_id,
+        'status': 'pending',
+        'progress': {
+            'current': 0,
+            'total': 1,
+            'message': '等待开始...',
+        },
+        'files': [],
+        'error': None,
+        'created_at': time.time(),
+    }
+
+    # 启动后台线程
+    thread = threading.Thread(
+        target=process_amac_task,
+        args=(task_id,),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
     })
 
 

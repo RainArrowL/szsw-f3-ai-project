@@ -18,7 +18,7 @@
         <!-- 头部 -->
         <header class="header">
             <div class="header-icon">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <rect x="3" y="3" width="18" height="18" rx="2"/>
                     <line x1="3" y1="9" x2="21" y2="9"/>
                     <line x1="9" y1="21" x2="9" y2="9"/>
@@ -29,62 +29,47 @@
             <p class="subtitle">上市公司历年三大财务报表 · 一键获取</p>
         </header>
 
-        <!-- 表单卡片 -->
-        <form id="fetchForm" class="form-card">
-            <!-- 年份选择 -->
-            <div class="form-section">
-                <label class="section-label">
-                    <span class="label-icon">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                            <line x1="16" y1="2" x2="16" y2="6"/>
-                            <line x1="8" y1="2" x2="8" y2="6"/>
-                            <line x1="3" y1="10" x2="21" y2="10"/>
+        <!-- 双列功能模块 -->
+        <div class="modules-grid">
+            <!-- ========== 左列：年报财务数据获取 ========== -->
+            <div class="module-card" id="annualModule">
+                <div class="module-header">
+                    <div class="module-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <line x1="9" y1="21" x2="9" y2="9"/>
                         </svg>
-                    </span>
-                    年度范围
-                </label>
-                <div class="year-range">
-                    <div class="year-picker">
-                        <label>开始年份</label>
-                        <select id="startYear" name="start_year" required>
-                            <option value="">-- 选择 --</option>
-                        </select>
                     </div>
-                    <span class="year-separator">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="5" y1="12" x2="19" y2="12"/>
-                            <polyline points="12 5 19 12 12 19"/>
-                        </svg>
-                    </span>
-                    <div class="year-picker">
-                        <label>结束年份</label>
-                        <select id="endYear" name="end_year" required>
-                            <option value="">-- 选择 --</option>
-                        </select>
+                    <div class="module-title-area">
+                        <h2 class="module-title">年报数据爬取</h2>
+                        <span class="module-badge">财务报表</span>
                     </div>
                 </div>
-            </div>
 
-            <!-- 企业名单输入 -->
-            <div class="form-section">
-                <label class="section-label">
-                    <span class="label-icon">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
-                    </span>
-                    企业名单
-                </label>
-                <textarea
-                    id="textInput"
-                    name="text_input"
-                    rows="4"
-                    placeholder="输入企业名称或股票代码，用逗号或换行分隔&#10;例如：贵州茅台,600519&#10;      平安银行&#10;      000001"
-                >平安银行股份有限公司
+                <form id="annualForm" class="module-form">
+                    <!-- 年份选择 -->
+                    <div class="form-row">
+                        <label class="mini-label">年度范围</label>
+                        <div class="year-range-compact">
+                            <select id="startYear" required>
+                                <option value="">--</option>
+                            </select>
+                            <span class="dash">&mdash;</span>
+                            <select id="endYear" required>
+                                <option value="">--</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- 企业名单输入 -->
+                    <div class="form-row">
+                        <label class="mini-label">企业名单</label>
+                        <textarea
+                            id="textInput"
+                            rows="3"
+                            placeholder="输入企业名称或股票代码，用逗号或换行分隔&#10;例如：贵州茅台,600519&#10;      平安银行&#10;      000001"
+                        >平安银行股份有限公司
 招商银行股份有限公司
 国银金融租赁股份有限公司
 招商证券股份有限公司
@@ -94,99 +79,127 @@
 中信证券股份有限公司
 中国平安保险（集团）股份有限公司
 阳光保险集团股份有限公司</textarea>
-            </div>
-
-            <!-- 文件上传 -->
-            <div class="form-section">
-                <label class="section-label">
-                    <span class="label-icon">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="17 8 12 3 7 8"/>
-                            <line x1="12" y1="3" x2="12" y2="15"/>
-                        </svg>
-                    </span>
-                    或上传名单文件
-                </label>
-                <div class="upload-area" id="uploadArea">
-                    <input type="file" id="fileInput" name="file" accept=".txt,.csv">
-                    <div class="upload-content">
-                        <svg class="upload-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14 2 14 8 20 8"/>
-                            <line x1="12" y1="18" x2="12" y2="12"/>
-                            <polyline points="9 15 12 12 15 15"/>
-                        </svg>
-                        <p class="upload-text">拖拽 .txt 或 .csv 文件到此处</p>
-                        <p class="upload-hint">每行一个企业名称或代码，逗号分隔</p>
                     </div>
-                    <div class="file-info" id="fileInfo" style="display:none;">
-                        <span class="file-name" id="fileName"></span>
-                        <button type="button" class="file-remove" id="fileRemove">×</button>
-                    </div>
-                </div>
-            </div>
 
-            <!-- 行业均值开关 -->
-            <div class="form-section">
-                <div class="toggle-row">
-                    <label class="toggle-label" for="industryAvgToggle">
+                    <!-- 文件上传 -->
+                    <div class="form-row">
+                        <label class="mini-label">或上传名单</label>
+                        <div class="upload-area" id="uploadArea">
+                            <input type="file" id="fileInput" accept=".txt,.csv">
+                            <div class="upload-content">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <polyline points="12 18 12 12 9 15"/>
+                                    <line x1="12" y1="12" x2="15" y2="15"/>
+                                </svg>
+                                <span>拖拽 .txt/.csv 文件</span>
+                            </div>
+                            <div class="file-info" id="fileInfo" style="display:none;">
+                                <span class="file-name" id="fileName"></span>
+                                <button type="button" class="file-remove" id="fileRemove">&times;</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 行业均值开关 -->
+                    <div class="toggle-row">
                         <span class="toggle-text">输出同行业企业均值</span>
-                    </label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="industryAvgToggle" name="industry_avg">
-                        <span class="toggle-slider"></span>
-                    </label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="industryAvgToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- 按钮 -->
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary btn-sm" id="annualSubmitBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            开始获取
+                        </button>
+                        <button type="button" class="btn-secondary btn-sm" id="annualResetBtn">清空</button>
+                    </div>
+                </form>
+
+                <!-- 年报结果区域 -->
+                <div class="module-result" id="annualResult" style="display:none;">
+                    <div class="progress-section" id="annualProgress">
+                        <div class="progress-header">
+                            <span class="progress-label" id="annualProgressLabel">正在处理...</span>
+                            <span class="progress-percent" id="annualProgressPercent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="annualProgressFill"></div>
+                        </div>
+                        <p class="progress-message" id="annualProgressMessage"></p>
+                    </div>
+                    <div class="result-section" id="annualResultSection" style="display:none;">
+                        <div class="result-status" id="annualResultStatus"></div>
+                        <div class="file-list" id="annualFileList"></div>
+                    </div>
                 </div>
-                <p class="toggle-hint">勾选后，将单独输出一个同行业各企业均值的Excel文件</p>
             </div>
 
-            <!-- 公募基金管理人名录开关 -->
-            <div class="form-section">
-                <div class="toggle-row">
-                    <label class="toggle-label" for="amacToggle">
-                        <span class="toggle-text">获取公募基金管理人名录</span>
-                    </label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="amacToggle" name="amac_list">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-                <p class="toggle-hint">勾选后，将从中国证券投资基金业协会爬取公募基金管理人名录（约165家），单独输出Excel</p>
-            </div>
-
-            <!-- 按钮 -->
-            <div class="form-actions">
-                <button type="submit" class="btn-primary" id="submitBtn">
-                    <span class="btn-icon">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="5 3 19 12 5 21 5 3"/>
+            <!-- ========== 右列：公募基金管理人名录 ========== -->
+            <div class="module-card" id="amacModule">
+                <div class="module-header">
+                    <div class="module-icon amac-icon">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                         </svg>
-                    </span>
-                    开始获取数据
-                </button>
-                <button type="button" class="btn-secondary" id="resetBtn">清空</button>
-            </div>
-        </form>
-
-        <!-- 结果区域 -->
-        <div class="result-card" id="resultCard" style="display:none;">
-            <!-- 进度 -->
-            <div class="progress-section" id="progressSection">
-                <div class="progress-header">
-                    <span class="progress-label" id="progressLabel">正在处理...</span>
-                    <span class="progress-percent" id="progressPercent">0%</span>
+                    </div>
+                    <div class="module-title-area">
+                        <h2 class="module-title">公募基金管理人名录</h2>
+                        <span class="module-badge amac-badge">中基协</span>
+                    </div>
                 </div>
-                <div class="progress-track">
-                    <div class="progress-fill" id="progressFill"></div>
-                </div>
-                <p class="progress-message" id="progressMessage"></p>
-            </div>
 
-            <!-- 结果信息 -->
-            <div class="result-section" id="resultSection" style="display:none;">
-                <div class="result-status" id="resultStatus"></div>
-                <div class="file-list" id="fileList"></div>
+                <div class="amac-hero">
+                    <div class="amac-icon-large">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                            <rect x="3" y="3" width="18" height="18" rx="3"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <path d="M8 13h3M8 16h5M8 19h2"/>
+                            <path d="M15 13l3 3M18 13l-3 3"/>
+                        </svg>
+                    </div>
+                    <p class="amac-desc">从中国证券投资基金业协会<br>爬取公募基金管理人名录</p>
+                    <p class="amac-hint">约165家机构 · 一键导出Excel</p>
+                </div>
+
+                <form id="amacForm" class="module-form">
+                    <div class="form-actions amac-actions">
+                        <button type="submit" class="btn-primary btn-sm" id="amacSubmitBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            开始获取
+                        </button>
+                    </div>
+                </form>
+
+                <!-- 名录结果区域 -->
+                <div class="module-result" id="amacResult" style="display:none;">
+                    <div class="progress-section" id="amacProgress">
+                        <div class="progress-header">
+                            <span class="progress-label" id="amacProgressLabel">正在爬取...</span>
+                            <span class="progress-percent" id="amacProgressPercent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="amacProgressFill"></div>
+                        </div>
+                        <p class="progress-message" id="amacProgressMessage"></p>
+                    </div>
+                    <div class="result-section" id="amacResultSection" style="display:none;">
+                        <div class="result-status" id="amacResultStatus"></div>
+                        <div class="file-list" id="amacFileList"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
