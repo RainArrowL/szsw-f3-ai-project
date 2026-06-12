@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 深交所日度概况爬取模块
-从 https://www.szse.cn/market/stock/situation/daily/index.html 获取日度概况数据
-提取深市合计的成交量和成交金额
+从 东方财富网 push2his API 获取深证综指(399106)日K线数据
+提取深市的成交量和成交金额
 """
 
-import random
 import time
 import logging
 from datetime import date, timedelta, datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
+from collections import OrderedDict
 
 import requests
 import openpyxl
@@ -18,196 +18,93 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 logger = logging.getLogger(__name__)
 
-# SZSE API 端点
-SZSE_API_URL = "https://www.szse.cn/api/report/ShowReport/data"
+# 东方财富 push2his API 端点
+PUSH_API_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 
 # 请求头
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://www.szse.cn/market/stock/situation/daily/index.html",
+    "Referer": "https://quote.eastmoney.com/",
     "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 
 
-def generate_trading_dates(year: int) -> List[str]:
+def fetch_year_data(year: int, progress_callback: Optional[Callable] = None) -> List[Tuple[str, float, float]]:
     """
-    生成指定年份的所有潜在交易日（周一至周五）
-    返回格式为 YYYY-MM-DD 的日期列表
+    从东方财富 push2his API 获取深证综指(399106)日K线数据
+    深证综指涵盖深市全部股票，其成交量和成交额近似深市合计
+    
+    fields2解析:
+      f51: 日期, f52: 开盘, f53: 收盘, f54: 最高, f55: 最低
+      f56: 成交量(手), f57: 成交额(元)
     """
-    dates = []
-    start = date(year, 1, 1)
-    end = date(year, 12, 31)
-    current = start
-    while current <= end:
-        if current.weekday() < 5:  # 周一到周五
-            dates.append(current.strftime("%Y-%m-%d"))
-        current += timedelta(days=1)
-    return dates
+    results = []
 
-
-def fetch_daily_data(query_date: str) -> Optional[dict]:
-    """
-    从深交所API获取指定日期的日度概况数据
-
-    Args:
-        query_date: 查询日期，格式 YYYY-MM-DD
-
-    Returns:
-        包含日度概况数据的字典，包含 主板/创业板/深市合计 的成交量和成交金额
-        如果当天不是交易日则返回 None
-    """
     params = {
-        "SHOWTYPE": "JSON",
-        "CATALOGID": "1815",
-        "txtDate": query_date,
-        "random": random.random(),
+        "secid": "0.399106",          # 深证综指
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+        "klt": "101",                 # 日线
+        "fqt": "0",                   # 不复权
+        "beg": f"{year}0101",
+        "end": f"{year}1231",
+        "lmt": "300",
     }
 
     try:
-        resp = requests.get(SZSE_API_URL, params=params, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
+        if progress_callback:
+            progress_callback(0, 1, "正在连接东方财富行情接口...")
 
-        result = resp.json()
+        resp = requests.get(PUSH_API_URL, params=params, headers=HEADERS, timeout=30)
 
-        # 检查返回数据结构
-        if not result or not isinstance(result, list):
-            return None
+        if resp.status_code != 200:
+            logger.error(f"push2his API 返回状态码: {resp.status_code}")
+            return results
 
-        first_item = result[0]
-        if "error" in first_item and first_item["error"]:
-            # 非交易日或API返回错误
-            return None
+        body = resp.json()
+        if not body or "data" not in body or not body["data"]:
+            logger.error("push2his API 返回数据为空")
+            return results
 
-        if "data" not in first_item or not first_item["data"]:
-            return None
+        klines = body["data"].get("klines", [])
+        if not klines:
+            logger.warning("push2his API 返回空K线列表")
+            return results
 
-        # 解析数据
-        data_rows = first_item["data"]
-        parsed = {}
+        total = len(klines)
+        logger.info(f"获取到 {total} 条日K线数据")
 
-        for row in data_rows:
-            # 根据常见的字段名匹配
-            # 字段可能是: zqjc(证券简称), cjgs(成交量), cjje(成交金额)
-            name = None
-            volume = None
-            amount = None
+        for idx, line in enumerate(klines):
+            parts = line.split(",")
+            if len(parts) < 7:
+                continue
 
-            # 尝试多种可能的字段名组合
-            if "zqjc" in row:
-                name = str(row["zqjc"]).replace("&nbsp;", "").strip()
-            elif "name" in row:
-                name = str(row["name"]).replace("&nbsp;", "").strip()
+            date_str = parts[0]
+            vol_shou = float(parts[5]) if parts[5] and parts[5] != "-" else 0
+            amt_yuan = float(parts[6]) if parts[6] and parts[6] != "-" else 0
 
-            if "cjgs" in row:
-                volume = _parse_number(row["cjgs"])
-            elif "volume" in row:
-                volume = _parse_number(row["volume"])
-            elif "VOLUME" in row:
-                volume = _parse_number(row["VOLUME"])
+            if amt_yuan <= 0:
+                continue
 
-            if "cjje" in row:
-                amount = _parse_number(row["cjje"])
-            elif "amount" in row:
-                amount = _parse_number(row["amount"])
-            elif "AMOUNT" in row:
-                amount = _parse_number(row["AMOUNT"])
+            # 单位转换
+            # 成交量: 手 → 亿股  (1手=100股, 1亿=1e8)
+            vol_yi = round(vol_shou * 100 / 1e8, 2)
+            # 成交额: 元 → 亿元
+            amt_yi = round(amt_yuan / 1e8, 2)
 
-            if name and volume is not None and amount is not None:
-                parsed[name] = {"volume": volume, "amount": amount}
+            results.append((date_str, vol_yi, amt_yi))
 
-        if parsed:
-            return parsed
+            if progress_callback:
+                progress_callback(idx + 1, total, f"已获取 {date_str}")
 
-        # 如果上面的解析失败，尝试另一种数据格式
-        # 某些API版本返回的是扁平结构
-        return _parse_flat_format(data_rows)
+        logger.info(f"处理完成，共 {len(results)} 个有效交易日")
 
     except requests.RequestException as e:
-        logger.warning(f"请求 {query_date} 失败: {e}")
-        return None
+        logger.error(f"请求 push2his API 失败: {e}")
     except (ValueError, KeyError, IndexError) as e:
-        logger.warning(f"解析 {query_date} 数据失败: {e}")
-        return None
-
-
-def _parse_flat_format(data_rows: list) -> Optional[dict]:
-    """
-    尝试解析扁平化数据格式（备用方案）
-    某些API版本将所有数据放在一个扁平列表中
-    """
-    try:
-        result = {}
-        for row in data_rows:
-            # 遍历所有键值对，尝试找到名称和数值
-            keys = list(row.keys())
-            values = list(row.values())
-
-            name_key = None
-            for k in keys:
-                if k.lower() in ("zqjc", "name", "item", "type", "category"):
-                    name_key = k
-                    break
-
-            if name_key:
-                name = str(row[name_key]).replace("&nbsp;", "").strip()
-                vol = None
-                amt = None
-                for k in keys:
-                    if k.lower() in ("cjgs", "volume", "vol"):
-                        vol = _parse_number(row[k])
-                    if k.lower() in ("cjje", "amount", "amt", "turnover"):
-                        amt = _parse_number(row[k])
-                if name and vol is not None and amt is not None:
-                    result[name] = {"volume": vol, "amount": amt}
-
-        return result if result else None
-    except Exception:
-        return None
-
-
-def _parse_number(value) -> Optional[float]:
-    """解析数值，去除逗号和空格"""
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    try:
-        return float(str(value).replace(",", "").replace(" ", "").strip())
-    except (ValueError, TypeError):
-        return None
-
-
-def fetch_year_data(year: int, progress_callback=None) -> List[Tuple[str, float, float]]:
-    """
-    获取指定年份所有交易日的深市合计数据
-
-    Args:
-        year: 年份
-        progress_callback: 进度回调函数，签名: callback(current, total, message)
-
-    Returns:
-        [(日期, 成交量(亿), 成交金额(亿元)), ...] 列表
-    """
-    dates = generate_trading_dates(year)
-    results = []
-    total = len(dates)
-
-    for idx, d in enumerate(dates):
-        if progress_callback:
-            progress_callback(idx + 1, total, f"正在查询 {d}...")
-
-        data = fetch_daily_data(d)
-
-        if data and "深市合计" in data:
-            sz_data = data["深市合计"]
-            results.append((d, sz_data["volume"], sz_data["amount"]))
-            logger.info(f"  {d}: 成交量={sz_data['volume']}亿, 成交金额={sz_data['amount']}亿元")
-        else:
-            logger.debug(f"  {d}: 非交易日或无数据")
-
-        # 请求间隔，避免被限流
-        time.sleep(0.3)
+        logger.error(f"解析 push2his API 数据失败: {e}")
+    except Exception as e:
+        logger.error(f"未知错误: {e}")
 
     return results
 
@@ -218,12 +115,11 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
 
     输出格式：
     - 行：日期（按周分组，每周后插入小计行）
-    - 列：成交量（亿）、成交金额（亿元）、日均成交金额、成交额×0.05%
+    - 列：成交量（亿股）、成交金额（亿元）、日均成交金额、成交额×0.05%
     - 日均成交金额仅在每周小计行显示，计算公式：当周成交金额小计 ÷ 当周实际交易日天数
     """
     import os
     from datetime import date as date_type
-    from collections import OrderedDict
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -262,7 +158,7 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     ws.row_dimensions[1].height = 36
 
     # ---- 表头 ----
-    headers = ["日期", "成交量（亿）", "成交金额（亿元）", "日均成交金额", "成交额×0.05%"]
+    headers = ["日期", "成交量（亿股）", "成交金额（亿元）", "日均成交金额", "成交额×0.05%"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_idx, value=header)
         cell.font = header_font
@@ -288,7 +184,6 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     total_days = 0
 
     for week_key, week_data in weeks.items():
-        # 本周数据
         week_vol = 0.0
         week_amt = 0.0
         week_days = len(week_data)
@@ -346,7 +241,6 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
         current_row += 1
 
     # ---- 年度汇总行 ----
-    current_row += 0  # 不额外空行，紧接最后一周小计
     year_avg_amt = round(total_amt / total_days, 2) if total_days > 0 else 0
     year_fee_005 = round(total_amt * 0.0005, 2)
 
@@ -367,10 +261,10 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 16
     ws.column_dimensions["C"].width = 18
-    ws.column_dimensions["D"].width = 16
+    ws.column_dimensions["D"].width = 18
     ws.column_dimensions["E"].width = 16
 
-    # ---- 冻结窗格（冻结标题+表头） ----
+    # ---- 冻结窗格 ----
     ws.freeze_panes = "A3"
 
     # 保存
@@ -378,13 +272,12 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     filename = f"深交所日度概况_{year}年_{timestamp}.xlsx"
     filepath = os.path.join(output_dir, filename)
     wb.save(filepath)
-    logger.info(f"Excel已保存: {filepath}")
+    logger.info(f"Excel已保存: {filepath} (共{len(data)}个交易日, {len(weeks)}周)")
 
     return filepath
 
 
 if __name__ == "__main__":
-    # 测试
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     def progress_cb(cur, total, msg):
