@@ -123,6 +123,44 @@ def _extract_year_from_date(date_str: str) -> str:
     return date_str
 
 
+def _write_notes_sheet(wb, records: List[Dict[str, Any]]):
+    """写入附注sheet（所有年度合并）"""
+    ws = wb.create_sheet(title="附注")
+
+    # 收集所有非空字段名
+    all_fields = []
+    seen = set()
+    # 按报告年度降序排列
+    records = sorted(records, key=lambda x: str(x.get("报告年度", "")), reverse=True)
+
+    for rec in records:
+        for key in rec:
+            if key not in seen and key not in SKIP_META_FIELDS:
+                all_fields.append(key)
+                seen.add(key)
+
+    if not all_fields:
+        ws.cell(row=1, column=1, value="暂无附注数据")
+        return
+
+    # 表头
+    headers = ["报告年度", "报告类型"] + all_fields
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = HEADER_ALIGNMENT
+        cell.border = THIN_BORDER
+
+    for row_idx, rec in enumerate(records, 2):
+        ws.cell(row=row_idx, column=1, value=rec.get("报告年度", ""))
+        ws.cell(row=row_idx, column=2, value=rec.get("报告类型", ""))
+        for col_idx, field in enumerate(all_fields, 3):
+            ws.cell(row=row_idx, column=col_idx, value=rec.get(field, ""))
+
+    _format_sheet(ws, headers, len(headers), len(records))
+
+
 def write_company_excel(
     company_name: str,
     financial_data: Dict[str, List[Dict[str, Any]]],
@@ -159,6 +197,11 @@ def write_company_excel(
             # 创建空sheet
             ws = wb.create_sheet(title=f"{report_name}(无数据)")
             ws.cell(row=1, column=1, value="暂无数据")
+            continue
+
+        # 附注：单独一个sheet，所有年度在一起
+        if report_name == "附注":
+            _write_notes_sheet(wb, records)
             continue
 
         # 按年份分组
@@ -308,6 +351,9 @@ def write_merged_by_report_type(
                         f"{report_name}_{safe_ind}", rows, output_dir, files
                     )
 
+    # 合并附注
+    _write_merged_notes_excel(all_company_data, output_dir, files)
+
     return files
 
 
@@ -376,6 +422,63 @@ def _write_single_merged_excel(
     wb.save(filepath)
     files.append(filepath)
     logger.info(f"合并Excel已保存: {filepath} ({len(rows)}行, {len(all_fields)}字段)")
+
+
+def _write_merged_notes_excel(
+    all_company_data: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    output_dir: str,
+    files: List[str],
+):
+    """写入合并的附注Excel文件"""
+    from datetime import datetime
+
+    all_rows = []
+    all_fields = []
+    seen_fields = set()
+
+    for company_name, data in all_company_data.items():
+        notes = data.get("附注", [])
+        if not notes:
+            continue
+        for rec in notes:
+            all_rows.append((company_name, rec))
+            for key in rec:
+                if key not in seen_fields and key not in SKIP_META_FIELDS:
+                    all_fields.append(key)
+                    seen_fields.add(key)
+
+    if not all_rows:
+        return
+
+    # 按公司名和报告年度排序
+    all_rows.sort(key=lambda x: (x[0], str(x[1].get("报告年度", "0"))), reverse=True)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "附注"
+
+    headers = ["公司名称", "报告年度", "报告类型"] + all_fields
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = HEADER_ALIGNMENT
+        cell.border = THIN_BORDER
+
+    for row_idx, (company_name, rec) in enumerate(all_rows, 2):
+        ws.cell(row=row_idx, column=1, value=company_name)
+        ws.cell(row=row_idx, column=2, value=rec.get("报告年度", ""))
+        ws.cell(row=row_idx, column=3, value=rec.get("报告类型", ""))
+        for col_idx, field in enumerate(all_fields, 4):
+            ws.cell(row=row_idx, column=col_idx, value=rec.get(field, ""))
+
+    _format_sheet(ws, headers, len(headers), len(all_rows))
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = os.path.join(output_dir, f"附注_合并_{timestamp}.xlsx")
+    wb.save(filepath)
+    files.append(filepath)
+    logger.info(f"合并附注Excel已保存: {filepath} ({len(all_rows)}行, {len(all_fields)}字段)")
 
 
 def write_industry_avg_excel(

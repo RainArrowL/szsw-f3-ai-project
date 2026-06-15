@@ -367,6 +367,200 @@ REPORT_NAMES_CN = {
     "cashflow": "现金流量表",
 }
 
+# 附注（主要财务指标）字段映射
+NOTES_FIELDS_CN = {
+    "SECUCODE": "证券代码",
+    "SECURITY_CODE": "股票代码",
+    "SECURITY_NAME_ABBR": "证券简称",
+    "ORG_CODE": "机构代码",
+    "ORG_TYPE": "机构类型",
+    "REPORT_DATE": "报告日期",
+    "REPORT_DATE_NAME": "报告期名称",
+    "REPORT_TYPE": "报告类型",
+    "REPORT_YEAR": "报告年度",
+    "NOTICE_DATE": "公告日期",
+    "CURRENCY": "币种",
+    "IS_BZ": "是否标准",
+    # 每股指标
+    "EPSJB": "基本每股收益(元)",
+    "EPSJBTZ": "基本每股收益同比(%)",
+    "EPSKCJB": "扣非基本每股收益(元)",
+    "EPSXS": "稀释每股收益(元)",
+    "BPS": "每股净资产(元)",
+    "BPSTZ": "每股净资产同比(%)",
+    "MGJYXJJE": "每股经营现金流(元)",
+    "MGJYXJJETZ": "每股经营现金流同比(%)",
+    "MGWFPLR": "每股未分配利润(元)",
+    "MGWFPLRTZ": "每股未分配利润同比(%)",
+    "MGZBGJ": "每股资本公积(元)",
+    "MGZBGJTZ": "每股资本公积同比(%)",
+    # 盈利能力
+    "ROEJQ": "净资产收益率(%)",
+    "ROEJQTZ": "净资产收益率同比(%)",
+    "ROEKCJQ": "扣非净资产收益率(%)",
+    "ROIC": "投入资本回报率(%)",
+    "ROICTZ": "投入资本回报率同比(%)",
+    "XSJLL": "销售净利率(%)",
+    "XSMLL": "销售毛利率(%)",
+    "XSMLL_TB": "销售毛利率同比(%)",
+    "REVENUE_RATIO": "成本收入比(%)",
+    "MLR": "毛利率(%)",
+    "TAXRATE": "实际税率(%)",
+    # 成长能力
+    "TOTALOPERATEREVE": "营业总收入(元)",
+    "TOTALOPERATEREVETZ": "营业总收入同比(%)",
+    "PARENTNETPROFIT": "归属母公司净利润(元)",
+    "PARENTNETPROFITTZ": "归属母公司净利润同比(%)",
+    "KCFJCXSYJLR": "扣非归属母公司净利润(元)",
+    "KCFJCXSYJLRTZ": "扣非归属母公司净利润同比(%)",
+    "TA_YOYRATIO_PK": "总资产同比(%)",
+    "OI_YOYRATIO_PK": "营业收入同比(%)",
+    "EQUITY_YOYRATIO_PK": "净资产同比(%)",
+    "DJD_DPNP_YOY": "单季度净利润同比(%)",
+    "DJD_TOI_YOY": "单季度营收同比(%)",
+    "DJD_DPNP_QOQ": "单季度净利润环比(%)",
+    "DJD_TOI_QOQ": "单季度营收环比(%)",
+    "DJD_DEDUCTDPNP_YOY": "单季度扣非净利润同比(%)",
+    "DJD_DEDUCTDPNP_QOQ": "单季度扣非净利润环比(%)",
+    # 收益质量
+    "JYXJLYYSR": "经营现金流/营业收入",
+    "KFJLRGDHBZC": "扣非净利润/归母净利润",
+    "NETPROFITRPHBZC": "净利润/归母净利润",
+    "YYZSRGDHBZC": "营业总收入/归母净利润",
+    # 偿债能力
+    "ZCFZL": "资产负债率(%)",
+    "ZCFZLTZ": "资产负债率同比(%)",
+    "LIQUIDATION_RATIO": "流动比率(%)",
+    "CQBL": "产权比率(%)",
+    "QYCS": "权益乘数(倍)",
+    "INTEREST_DEBT_RATIO": "带息债务/全部投入资本(%)",
+    "LTDRR": "长期负债/总资产(%)",
+    # 营运能力
+    "TOAZZL": "总资产周转率(次)",
+    "ZZCJLL": "总资产净利率(%)",
+    "ZZCJLLTZ": "总资产净利率同比(%)",
+    "ZZCZZTS": "总资产周转天数(天)",
+    "OPERATE_CYCLE": "营业周期(天)",
+    "INVENTORY_TR_YOY": "存货周转率(次)",
+    "YSZKZZL": "应收账款周转率(次)",
+    "YSZKZZTS": "应收账款周转天数(天)",
+    "CHZZL": "存货周转率(次)",
+    "CHZZTS": "存货周转天数(天)",
+    "LD": "流动比率",
+    "SD": "速动比率",
+    # 现金流量
+    "NETCASH_OPERATE_PK": "经营活动现金流净额(元)",
+    "NETCASH_INVEST_PK": "投资活动现金流净额(元)",
+    "NETCASH_FINANCE_PK": "筹资活动现金流净额(元)",
+    "FCFF_FORWARD": "企业自由现金流(元)",
+    # 资产负债表补充
+    "TOTAL_ASSETS_PK": "资产总计(元)",
+    "TOTAL_EQUITY_PK": "净资产(元)",
+    "LIABILITY": "负债合计(元)",
+    "TOTAL_SHARE": "总股本(股)",
+    "A_FREE_SHARE": "A股流通股本(股)",
+    "B_FREE_SHARE": "B股流通股本(股)",
+    "PER_OI": "人均营业收入(元)",
+    "PER_TOI": "人均营收(元)",
+    "STAFF_NUM": "员工人数",
+    "OPERATE_INCOME_PK": "营业收入(元)",
+    "OPERATE_PROFIT_PK": "营业利润(元)",
+    # 银行专项指标
+    "NET_INTEREST_MARGIN": "净息差(%)",
+    "NET_INTEREST_SPREAD": "净利差(%)",
+    "NONPERLOAN": "不良贷款率(%)",
+    "NON_PERFORMING_LOAN": "不良贷款(元)",
+    "OVERDUE_LOANS": "逾期贷款(元)",
+    "LOAN_PROVISION_RATIO": "拨备覆盖率(%)",
+    "LOAN_ADVANCES": "发放贷款及垫款(元)",
+    "GROSSLOANS": "贷款总额(元)",
+    "TOTALDEPOSITS": "存款总额(元)",
+    "FIRST_ADEQUACY_RATIO": "核心一级资本充足率(%)",
+    "NEWCAPITALADER": "资本充足率(%)",
+    "HXYJBCZL": "核心一级资本充足率(%)",
+    "BLDKBBL": "不良贷款拨备覆盖率(%)",
+    "NZBJE": "资本净额(元)",
+    "LIQUIDITY_COVERAGE_RATIO": "流动性覆盖率(%)",
+    "NET_STABLE_FUNDING_RATIO": "净稳定资金率(%)",
+    # 保险专项指标
+    "EARNED_PREMIUM": "已赚保费(元)",
+    "COMPENSATE_EXPENSE": "赔付支出(元)",
+    "SURRENDER_RATE_LIFE": "退保率(%)",
+    "NBV_LIFE": "新业务价值(元)",
+    "NBV_RATE": "新业务价值率(%)",
+    "SOLVENCY_AR": "偿付能力充足率(%)",
+    "RISK_COVERAGE": "风险覆盖率(%)",
+    # 证券专项指标
+    "JJYWFXZB": "经纪业务净收入(元)",
+    "ZQZYYWFXZB": "证券自营业务净收入(元)",
+    "ZQCXYWFXZB": "证券承销业务净收入(元)",
+    "RZRQYWFXZB": "融资融券业务净收入(元)",
+    "YYFXZB": "营业净收入(元)",
+    "XJLLB": "净资本(元)",
+    "ZJBZC": "净资本/净资产(%)",
+    "RCAPITAL_RATIO": "风险资本准备(元)",
+    "RCOST_RATIO": "风险覆盖率(%)",
+    "CAPITAL_LEVERAGE_RATIO": "资本杠杆率(%)",
+    "JZB": "净资本(元)",
+    "JZC": "净资产(元)",
+    "PROPRIETARY_CAPITAL": "自有资金(元)",
+    "NET_CAPITAL_LIABILITIES": "净资本/负债(%)",
+    "NET_ASSETS_LIABILITIES": "净资产/负债(%)",
+    "ZYGPGMJZC": "自营股票/净资产(%)",
+    "ZYGDSYLZQJZB": "自营固定收益类证券/净资产(%)",
+    # 其他
+    "AVG_TOI": "平均营收(元)",
+    "AVG_NET_PROFIT": "平均净利润(元)",
+    "UPDATE_DATE": "更新日期",
+    "XSJXLYYSR": "销售及管理费用/营收(%)",
+    "NCO_OP": "经营现金流/营收(%)",
+    "NCO_NETPROFIT": "经营现金流/净利润(%)",
+    "NCO_FIXED": "经营现金流/固定资产(%)",
+    "NET_ROI": "净资产收益率(摊薄%，%)",
+    "TOTAL_ROI": "总资产收益率(%)",
+    "SALE_ER_PK": "销售费用率(%)",
+    "SS_OI": "销售费用/营收(%)",
+    "SS_TA": "销售费用/总资产(%)",
+    "RE_RATIO_PK": "研发费用率(%)",
+    "RDEXPEND": "研发费用(元)",
+    "RDPERSONNEL": "研发人员(人)",
+    "PRATIO": "市盈率",
+    "JZBJZC": "净资本/净资产(%)",
+    "ZQYWFXZB": "证券业务净收入(元)",
+    "TOTALOPER_RATIO": "营业利润率(%)",
+    "CASH_RATIO": "现金比率(%)",
+    "CA_TA": "流动资产/总资产(%)",
+    "NCA_TA": "非流动资产/总资产(%)",
+    "CL_TL": "流动负债/总负债(%)",
+    "INTEREST_COVERAGE_RATIO": "利息保障倍数",
+    "INTSTCOVRATE": "利息保障倍数",
+    "FIXED_ASSET_TR": "固定资产周转率(次)",
+    "CURRENT_ASSET_TR": "流动资产周转率(次)",
+    "PAYABLE_TDAYS": "应付账款周转天数(天)",
+    "PREPAID_ACCOUNTS_RATIO": "预付款项/营收(%)",
+    "PREPAID_ACCOUNTS_TDAYS": "预付款项周转天数(天)",
+    "ACCOUNTS_PAYABLE_TR": "应付账款周转率(次)",
+    "FCFF_BACK": "企业自由现金流(回溯，元)",
+    "FC_LIABILITIES": "自由现金流/负债(%)",
+    "GUARD_SPEED_RATIO": "速动比率",
+    "NET_FUNDING_RATIO": "净稳定资金率(%)",
+    "RZRQYWFXZB": "融资融券净收入(元)",
+    "CAPITAL_PROVISIONS_SUM": "资本准备合计(元)",
+    "NHJZ_CURRENT_AMT": "年内净值变动(元)",
+    "STAFF_NUM": "员工人数",
+    "PREMIUM_RECE": "应收保费(元)",
+    "PREMIUM_RECE_RATIO": "应收保费/营收(%)",
+    "ADVANCE_PREMIUM": "预收保费(元)",
+    "ADVANCE_PREMIUM_RATIO": "预收保费/营收(%)",
+}
+
+# 合并时跳过的元数据字段（在 NOTES 中也需要跳过）
+SKIP_NOTES_META = {
+    "SECUCODE", "SECURITY_CODE", "SECURITY_NAME_ABBR", "ORG_CODE",
+    "REPORT_DATE", "NOTICE_DATE", "UPDATE_DATE", "CURRENCY", "IS_BZ",
+    "SECURITY_TYPE_CODE",
+}
+
 
 # ==================== 数据获取协调器 ====================
 
@@ -443,7 +637,94 @@ class FinancialDataFetcher:
 
             time.sleep(0.5)
 
+        # 获取附注（主要财务指标）
+        notes = self.fetch_company_notes(stock_code, start_year, end_year)
+        if notes:
+            result["附注"] = notes
+
         return result
+
+    def fetch_company_notes(
+        self,
+        stock_code: str,
+        start_year: int,
+        end_year: int,
+    ) -> List[Dict]:
+        """
+        获取单个公司指定年份范围的附注（主要财务指标）数据
+
+        参数:
+            stock_code: 股票代码
+            start_year: 开始年份
+            end_year: 截止年份
+
+        返回:
+            [{中文名: 值}, ...]
+        """
+        import requests as req
+        logger.info(f"正在获取 {stock_code} 的附注数据...")
+
+        all_records = []
+        page = 1
+        while True:
+            params = {
+                "reportName": "RPT_F10_FINANCE_MAINFINADATA",
+                "columns": "ALL",
+                "pageNumber": page,
+                "pageSize": 50,
+                "sortColumns": "REPORT_DATE",
+                "sortTypes": "-1",
+                "source": "WEB",
+                "client": "WEB",
+                "filter": f'(SECURITY_CODE="{stock_code}")',
+            }
+            try:
+                resp = req.get(
+                    "https://datacenter-web.eastmoney.com/api/data/v1/get",
+                    params=params,
+                    headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Referer": "https://emweb.securities.eastmoney.com/",
+                    },
+                    timeout=30,
+                )
+                data = resp.json()
+                if not data.get("success") or not data.get("result"):
+                    break
+
+                items = data["result"].get("data", [])
+                if not items:
+                    break
+
+                for item in items:
+                    # 按年份过滤
+                    report_date = item.get("REPORT_DATE", "")
+                    if not report_date:
+                        continue
+                    year = int(str(report_date)[:4])
+                    if start_year <= year <= end_year:
+                        translated = self._translate_notes(item)
+                        all_records.append(translated)
+
+                total_pages = data["result"].get("pages", 1)
+                if page >= total_pages:
+                    break
+                page += 1
+
+            except Exception as e:
+                logger.error(f"获取 {stock_code} 附注失败: {e}")
+                break
+
+        logger.info(f"  {stock_code} 附注: {len(all_records)} 条")
+        return all_records
+
+    def _translate_notes(self, raw: Dict) -> Dict:
+        """将附注原始字段翻译为中文"""
+        translated = {}
+        for key, value in raw.items():
+            cn_key = NOTES_FIELDS_CN.get(key, key)
+            translated[cn_key] = value
+        return translated
 
     def fetch_multiple_companies(
         self,
