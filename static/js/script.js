@@ -226,6 +226,7 @@ const fileNameSpan = document.getElementById('fileName');
 const fileRemoveBtn = document.getElementById('fileRemove');
 const uploadContent = document.querySelector('.upload-area .upload-content');
 const industryAvgToggle = document.getElementById('industryAvgToggle');
+const mergeReportsToggle = document.getElementById('mergeReportsToggle');
 
 function initYearSelectors() {
     const currentYear = new Date().getFullYear();
@@ -329,6 +330,7 @@ const annualModule = createTaskModule({
         formData.append('text_input', textVal);
         if (file) formData.append('file', file);
         formData.append('industry_avg', industryAvgToggle.checked ? '1' : '0');
+        formData.append('merge_reports', mergeReportsToggle.checked ? '1' : '0');
         // 年报模块不再传 amac_list
         return formData;
     },
@@ -349,6 +351,7 @@ document.getElementById('annualResetBtn').addEventListener('click', () => {
     textInput.value = DEFAULT_COMPANIES;
     removeFile();
     industryAvgToggle.checked = false;
+    mergeReportsToggle.checked = false;
     document.getElementById('annualResult').style.display = 'none';
     startYearEl.value = 2021;
     endYearEl.value = 2025;

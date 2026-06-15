@@ -19,7 +19,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 
 from config import config
 from cninfo_fin_data import FinancialDataFetcher, resolve_companies
-from excel_writer import write_company_excel, write_industry_avg_excel
+from excel_writer import write_company_excel, write_industry_avg_excel, write_merged_by_report_type
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
 from szse_scraper import fetch_year_data, write_szse_excel
@@ -74,7 +74,7 @@ def parse_companies_from_text(text: str) -> List[str]:
 
 # ==================== 后台任务 ====================
 
-def process_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str], industry_avg_enabled: bool = False, amac_list_enabled: bool = False):
+def process_task(task_id: str, start_year: int, end_year: int, raw_companies: List[str], industry_avg_enabled: bool = False, amac_list_enabled: bool = False, merge_reports: bool = False):
     """
     后台线程执行数据获取任务
     """
@@ -95,29 +95,71 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
         total = len(resolved)
         task['progress']['total'] = total
 
-        # 获取各企业自身数据
-        for idx, (code, name) in enumerate(resolved):
-            current = idx + 1
-            company_display = f"{name}({code})"
-            task['progress']['current'] = current
-            task['progress']['message'] = f"正在获取: {company_display}"
+        if merge_reports:
+            # ========== 合并模式：按报表类型输出 ==========
+            all_company_data = {}
+            company_industries = {}
 
-            logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
+            for idx, (code, name) in enumerate(resolved):
+                current = idx + 1
+                company_display = f"{name}({code})"
+                task['progress']['current'] = current
+                task['progress']['message'] = f"正在获取: {company_display}"
 
-            data = fetcher.fetch_company_data(code, start_year, end_year)
+                logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
 
-            # 写入Excel（企业自身数据，不含行业均值）
-            filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
+                data = fetcher.fetch_company_data(code, start_year, end_year)
+                all_company_data[company_display] = data
 
-            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-            task['files'].append({
-                'name': os.path.basename(filepath),
-                'path': filepath,
-                'size': file_size,
-                'display_name': f"{company_display}_年报财务数据.xlsx",
-            })
+                # 获取行业信息
+                ind = get_company_industry(code)
+                if ind and ind[1]:
+                    company_industries[code] = ind[1]
+                else:
+                    company_industries[code] = "其他"
 
-            time.sleep(0.5)
+                time.sleep(0.5)
+
+            # 写入合并Excel
+            task['progress']['message'] = "正在生成合并报表文件..."
+            merged_files = write_merged_by_report_type(
+                all_company_data, company_industries, output_dir=config.output_dir
+            )
+
+            for filepath in merged_files:
+                name = os.path.basename(filepath)
+                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                task['files'].append({
+                    'name': name,
+                    'path': filepath,
+                    'size': file_size,
+                    'display_name': name,
+                })
+
+        else:
+            # ========== 分企业模式：每个企业单独Excel ==========
+            for idx, (code, name) in enumerate(resolved):
+                current = idx + 1
+                company_display = f"{name}({code})"
+                task['progress']['current'] = current
+                task['progress']['message'] = f"正在获取: {company_display}"
+
+                logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
+
+                data = fetcher.fetch_company_data(code, start_year, end_year)
+
+                # 写入Excel（企业自身数据，不含行业均值）
+                filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
+
+                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                task['files'].append({
+                    'name': os.path.basename(filepath),
+                    'path': filepath,
+                    'size': file_size,
+                    'display_name': f"{company_display}_年报财务数据.xlsx",
+                })
+
+                time.sleep(0.5)
 
         # 如果开启了行业均值，计算并输出到单独Excel
         if industry_avg_enabled:
@@ -241,6 +283,8 @@ def fetch_data():
     industry_avg_enabled = request.form.get('industry_avg', '0') == '1'
     # 是否爬取公募基金管理人名录
     amac_list_enabled = request.form.get('amac_list', '0') == '1'
+    # 是否按报表类型合并输出
+    merge_reports = request.form.get('merge_reports', '0') == '1'
 
     # 创建任务
     task_id = str(uuid.uuid4())[:8]
@@ -263,7 +307,7 @@ def fetch_data():
     # 启动后台线程
     thread = threading.Thread(
         target=process_task,
-        args=(task_id, start_year, end_year, companies, industry_avg_enabled, amac_list_enabled),
+        args=(task_id, start_year, end_year, companies, industry_avg_enabled, amac_list_enabled, merge_reports),
         daemon=True
     )
     thread.start()

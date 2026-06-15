@@ -9,7 +9,8 @@ Excel写入模块
 
 import os
 import logging
-from typing import Dict, List, Any
+from collections import defaultdict
+from typing import Dict, List, Set, Tuple, Any
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
 from openpyxl.utils import get_column_letter
@@ -218,6 +219,163 @@ def write_company_excel(
     wb.save(filepath)
     logger.info(f"Excel已保存: {filepath}")
     return filepath
+
+
+def write_merged_by_report_type(
+    all_company_data: Dict[str, Dict[str, List[Dict[str, Any]]]],
+    company_industries: Dict[str, str],  # {code: industry_name}
+    output_dir: str = None,
+) -> List[str]:
+    """
+    按报表类型合并输出Excel：资产负债表、利润表、现金流量表各一个文件。
+    若不同行业报表字段不同，按行业再拆分。
+
+    每个Excel只有一个sheet，列为：公司名称 | 年份 | [财务字段...]
+
+    参数:
+        all_company_data: {公司名: {"资产负债表": [...], "利润表": [...], "现金流量表": [...]}}
+        company_industries: {股票代码: 行业名称}  用于按行业分组
+        output_dir: 输出目录
+
+    返回:
+        生成的文件路径列表
+    """
+    if output_dir is None:
+        output_dir = config.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
+    files = []
+
+    # 报表类型 → 中文名
+    report_types = ["资产负债表", "利润表", "现金流量表"]
+
+    for report_name in report_types:
+        # 收集该报表类型所有公司的数据，按行业分组
+        # industry -> [(company_name, code, year, record), ...]
+        industry_groups: Dict[str, List[tuple]] = defaultdict(list)
+        # 记录每个行业的字段集合，用于判断是否需要拆分
+        industry_fields: Dict[str, Set[str]] = defaultdict(set)
+
+        for company_name, data in all_company_data.items():
+            records = data.get(report_name, [])
+            if not records:
+                continue
+
+            # 提取股票代码
+            code = ""
+            if "(" in company_name and ")" in company_name:
+                code = company_name.split("(")[-1].split(")")[0]
+
+            ind_name = company_industries.get(code, "其他")
+
+            for record in records:
+                report_date = record.get("报告期", "") or record.get("报告日期", "")
+                year = _extract_year_from_date(report_date)
+
+                industry_groups[ind_name].append((company_name, code, year, record))
+                # 收集字段
+                for key in record:
+                    if key not in SKIP_META_FIELDS:
+                        industry_fields[ind_name].add(key)
+
+        # 判断是否需要按行业拆分：比较各行业的字段集合
+        # 简单策略：如果只有一个行业或所有行业字段相同，合并为一个文件
+        if not industry_groups:
+            continue
+
+        if len(industry_groups) == 1:
+            # 只有一个行业，直接输出
+            _write_single_merged_excel(
+                report_name, list(industry_groups.values())[0],
+                output_dir, files
+            )
+        else:
+            # 多行业：检查字段差异
+            field_sets = list(industry_fields.values())
+            all_same = all(s == field_sets[0] for s in field_sets[1:])
+
+            if all_same:
+                # 字段相同，合并所有行业到一个文件
+                all_rows = []
+                for rows in industry_groups.values():
+                    all_rows.extend(rows)
+                _write_single_merged_excel(report_name, all_rows, output_dir, files)
+            else:
+                # 字段不同，按行业分别输出
+                for ind_name, rows in industry_groups.items():
+                    safe_ind = ind_name.replace("/", "_").replace("\\", "_").replace(":", "_")
+                    _write_single_merged_excel(
+                        f"{report_name}_{safe_ind}", rows, output_dir, files
+                    )
+
+    return files
+
+
+# 合并时跳过的元数据字段
+SKIP_META_FIELDS = {
+    "SECUCODE", "SECURITY_CODE", "SECURITY_NAME_ABBR", "ORG_CODE",
+    "SECURITY_TYPE_CODE", "TRADE_MARKET_CODE", "DATE_TYPE_CODE",
+    "REPORT_TYPE_CODE", "DATA_STATE", "MARKET", "REPORT_DATE",
+    "NOTICE_DATE", "INDUSTRY_CODE", "INDUSTRY_NAME",
+    "证券代码", "股票代码", "证券简称", "机构代码", "行业代码", "行业名称",
+    "交易市场", "证券类型代码", "交易市场代码", "日期类型代码",
+    "报告类型代码", "数据状态", "公告日期",
+}
+
+
+def _write_single_merged_excel(
+    report_name: str,
+    rows: List[tuple],  # [(company_name, code, year, record), ...]
+    output_dir: str,
+    files: List[str],
+):
+    """写入单个合并报表Excel文件"""
+    from datetime import datetime
+
+    # 按公司名称排序，同年份放在一起
+    rows.sort(key=lambda x: (x[2], x[0]), reverse=True)  # 按年份降序，同公司相邻
+
+    # 收集所有字段（联合所有记录）
+    all_fields = []
+    seen_fields = set()
+    for _, _, _, record in rows:
+        for key in record:
+            if key not in seen_fields and key not in SKIP_META_FIELDS:
+                all_fields.append(key)
+                seen_fields.add(key)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = report_name[:31]
+
+    # 表头：公司名称 | 年份 | 字段1 | 字段2 | ...
+    headers = ["公司名称", "年份"] + all_fields
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = HEADER_ALIGNMENT
+        cell.border = THIN_BORDER
+
+    # 写入数据
+    for row_idx, (company_name, code, year, record) in enumerate(rows, 2):
+        ws.cell(row=row_idx, column=1, value=company_name)
+        ws.cell(row=row_idx, column=2, value=year)
+
+        for col_idx, field in enumerate(all_fields, 3):
+            value = record.get(field, "")
+            ws.cell(row=row_idx, column=col_idx, value=value)
+
+    # 格式化
+    _format_sheet(ws, headers, len(headers), len(rows))
+
+    # 安全文件名
+    safe_name = report_name.replace("/", "_").replace("\\", "_").replace(":", "_")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = os.path.join(output_dir, f"{safe_name}_合并_{timestamp}.xlsx")
+    wb.save(filepath)
+    files.append(filepath)
+    logger.info(f"合并Excel已保存: {filepath} ({len(rows)}行, {len(all_fields)}字段)")
 
 
 def write_industry_avg_excel(
