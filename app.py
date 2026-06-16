@@ -570,12 +570,14 @@ def process_dividend_task(task_id: str, start_year: int, end_year: int, raw_comp
             task['progress']['total'] = total
             task['progress']['message'] = message
 
-        records, not_found = fetch_dividend_data(
+        records, hk_records, not_found = fetch_dividend_data(
             stock_codes, start_year, end_year, progress_callback=progress_callback
         )
 
         if records:
-            filepath = write_dividend_excel(records, start_year, end_year, output_dir=config.output_dir)
+            filepath = write_dividend_excel(records, start_year, end_year,
+                                            output_dir=config.output_dir,
+                                            hk_records=hk_records)
             file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
             task['files'].append({
                 'name': os.path.basename(filepath),
