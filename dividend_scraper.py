@@ -284,6 +284,7 @@ def _parse_dividend_record(item: Dict) -> Optional[Dict]:
             "REGIST_DATE": _normalize_date(item.get("EQUITY_RECORD_DATE", "")),
             "EX_DIVIDEND_DATE": _normalize_date(item.get("EX_DIVIDEND_DATE", "")),
             "PAYMENT_DATE": _normalize_date(item.get("EX_DIVIDEND_DATE", "")),  # 现金红利发放日≈除权除息日
+            "H_PAYMENT_DATE": "",  # H股红利派发日期（东方财富API暂无此字段，需人工补充）
             "CASH_DIVIDEND_PER_SHARE": round(per_share, 4),
             "TOTAL_AMOUNT": round(total_amount, 2),
             "TOTAL_SHARES": int(total_shares),  # 总股本（用于后续计算AH拆分）
@@ -385,7 +386,7 @@ def write_dividend_excel(
     )
 
     # 标题行
-    ws.merge_cells("A1:K1")
+    ws.merge_cells("A1:L1")
     title_cell = ws["A1"]
     title_cell.value = f"{start_year}-{end_year}年 上市公司分红公告"
     title_cell.font = Font(name="微软雅黑", size=14, bold=True, color="8E44AD")
@@ -393,7 +394,7 @@ def write_dividend_excel(
     ws.row_dimensions[1].height = 36
 
     # 表头
-    headers = ["股票代码", "股票名称", "公告日", "报告年度", "报告类型", "股权登记日", "现金红利发放日", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
+    headers = ["股票代码", "股票名称", "公告日", "报告年度", "报告类型", "股权登记日", "现金红利发放日", "H股红利派发日期", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_idx, value=header)
         cell.font = header_font
@@ -420,11 +421,11 @@ def write_dividend_excel(
         name = recs[0].get("SECURITY_NAME", "") if recs else ""
 
         # 分组标题行
-        ws.merge_cells(f"A{current_row}:K{current_row}")
+        ws.merge_cells(f"A{current_row}:L{current_row}")
         group_cell = ws.cell(row=current_row, column=1, value=f"{code}  {name}  ({len(recs)}条)")
         group_cell.font = group_font
         group_cell.fill = group_fill
-        for c in range(1, 12):
+        for c in range(1, 13):
             ws.cell(row=current_row, column=c).border = thin_border
         ws.row_dimensions[current_row].height = 22
         current_row += 1
@@ -451,21 +452,24 @@ def write_dividend_excel(
             ws.cell(row=current_row, column=7, value=rec.get("PAYMENT_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=7).border = thin_border
 
-            ws.cell(row=current_row, column=8, value=rec.get("CASH_DIVIDEND_PER_SHARE", 0)).alignment = cell_alignment
-            ws.cell(row=current_row, column=8).number_format = "#,##0.0000"
+            ws.cell(row=current_row, column=8, value=rec.get("H_PAYMENT_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=8).border = thin_border
 
-            ws.cell(row=current_row, column=9, value=rec.get("TOTAL_AMOUNT", 0)).alignment = cell_alignment
-            ws.cell(row=current_row, column=9).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=9, value=rec.get("CASH_DIVIDEND_PER_SHARE", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=9).number_format = "#,##0.0000"
             ws.cell(row=current_row, column=9).border = thin_border
 
-            ws.cell(row=current_row, column=10, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=10, value=rec.get("TOTAL_AMOUNT", 0)).alignment = cell_alignment
             ws.cell(row=current_row, column=10).number_format = "#,##0.00"
             ws.cell(row=current_row, column=10).border = thin_border
 
-            ws.cell(row=current_row, column=11, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=11, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
             ws.cell(row=current_row, column=11).number_format = "#,##0.00"
             ws.cell(row=current_row, column=11).border = thin_border
+
+            ws.cell(row=current_row, column=12, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=12).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=12).border = thin_border
 
             ws.row_dimensions[current_row].height = 20
             current_row += 1
