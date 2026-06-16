@@ -30,9 +30,8 @@ class CninfoAPI:
     # 非金融企业现金流量表
     CASH_FLOW_URL = "http://webapi.cninfo.com.cn/api/stock/p_finance0003"
 
-    # 金融企业相关API（备用）
-    # 按点时间查询的API（Point-in-Time）
-    BALANCE_SHEET_PT_URL = "http://webapi.cninfo.com.cn/api/stock/p_finance0010"
+    # 财务统计API
+    DIVIDEND_URL = "http://webapi.cninfo.com.cn/api/stock/p_stock2201"
 
     # 备选API：东方财富数据源（通过akshare等免费方式）
     EASTMONEY_BALANCE = "https://datacenter-web.eastmoney.com/api/data/v1/get"
@@ -304,6 +303,70 @@ class CninfoAPI:
                 logger.warning(f"东方财富数据获取失败({symbol} {year}): {e}")
 
         logger.info(f"东方财富获取 {stock_code} {report_type}: {len(all_records)} 条")
+        return all_records
+
+    # ==================== 分红数据 ====================
+
+    def fetch_dividend_data(
+        self,
+        stock_code: str,
+        start_date: str = "2010-01-01",
+        end_date: str = "2099-12-31",
+    ) -> List[Dict[str, Any]]:
+        """
+        获取公司分红转增信息（含派息日）
+
+        数据源: 巨潮资讯 p_stock2201 接口
+        返回字段包含: cash_divi_date(派现日), ex_divi_date(除权除息日),
+                     right_reg_date(股权登记日), cash_divi_rmb(派现含税),
+                     advance_date(预案公布日), event_procedure(事件进程)
+
+        参数:
+            stock_code: 股票代码
+            start_date: 开始日期，格式 "YYYY-MM-DD"
+            end_date: 截止日期，格式 "YYYY-MM-DD"
+
+        返回:
+            分红数据列表
+        """
+        sd = start_date.replace("-", "") if start_date else "20100101"
+        ed = end_date.replace("-", "") if end_date else "20991231"
+
+        all_records = []
+        page_num = 1
+
+        while True:
+            params = {
+                "scode": stock_code,
+                "sdate": sd,
+                "edate": ed,
+                "@limit": str(config.max_rows_per_page),
+                "@orderby": "advance_date:desc",
+            }
+
+            try:
+                result = self._api_request(self.DIVIDEND_URL, method="POST", params=params)
+            except Exception as e:
+                logger.warning(f"获取{stock_code}分红数据失败: {e}")
+                break
+
+            if not result:
+                break
+
+            records = result.get("records", [])
+            if not records:
+                break
+
+            all_records.extend(records)
+
+            total = result.get("total", 0)
+            fetched = page_num * config.max_rows_per_page
+            if fetched >= total:
+                break
+            page_num += 1
+            time.sleep(config.request_interval)
+
+        logger.info(f"获取{stock_code}分红数据: {len(all_records)} 条")
         return all_records
 
     # ==================== 股票搜索 ====================

@@ -169,21 +169,20 @@ def fetch_dividend_data(
             record["A_SHARE_AMOUNT"] = record["TOTAL_AMOUNT"]
             record["H_SHARE_AMOUNT"] = 0
 
-    # 为有H股的公司补充H股红利派发日期
+    # 为有H股的公司补充H股红利派发日期（通过巨潮资讯API获取派息日）
     if progress_callback:
-        progress_callback(0, 0, "正在获取H股红利派发日期...")
+        progress_callback(0, 0, "正在获取H股红利派发日期（巨潮资讯）...")
 
     # 按A股代码去重，避免重复查询
     a_codes = list(set(r["SECURITY_CODE"] for r in all_records if _get_ah_share_counts(r["SECURITY_CODE"])))
     hk_dates_cache: Dict[str, Dict[str, str]] = {}
 
     for a_code in a_codes:
-        hk_code = _lookup_hk_code(a_code)
-        if hk_code:
-            hk_dates_cache[a_code] = _fetch_hk_dividend_dates(hk_code)
-            logger.info(f"  {a_code} → H股代码 {hk_code}，获取到 {len(hk_dates_cache[a_code])} 条派息日")
+        hk_dates_cache[a_code] = _fetch_hk_dividend_dates(a_code)
+        if hk_dates_cache[a_code]:
+            logger.info(f"  {a_code}: 获取到 {len(hk_dates_cache[a_code])} 条派息日")
         else:
-            logger.info(f"  {a_code}: 未找到H股代码")
+            logger.info(f"  {a_code}: 未获取到派息日")
         time.sleep(0.3)
 
     # 填充分红记录的H股派息日
@@ -271,116 +270,56 @@ def _fetch_single_stock(code: str, start_year: int, end_year: int) -> List[Dict]
     return records
 
 
-def _fetch_hk_dividend_dates(hk_code: str) -> Dict[str, str]:
+def _fetch_hk_dividend_dates(stock_code: str) -> Dict[str, str]:
     """
-    获取H股分红派息日期
+    获取H股红利派发日期
 
-    数据源: 东方财富 PC_HKF10 分红派息API
-    URL: https://emweb.securities.eastmoney.com/PC_HKF10/CorporateEvents/GetFHSPList?code=XXXXX
+    数据源: 巨潮资讯 p_stock2201 接口（分红转增信息）
+    返回字段: cash_divi_date(派息日), ex_divi_date(除权除息日), right_reg_date(股权登记日)
 
     返回: {报告期: 派息日, ...}  如 {"2025-12-31": "2026-07-15"}
     """
-    if not hk_code:
+    if not stock_code:
         return {}
 
-    cache_key = f"hk_{hk_code}"
+    cache_key = f"cninfo_dividend_{stock_code}"
     if cache_key in _h_payment_date_cache:
         return _h_payment_date_cache[cache_key]  # type: ignore
 
     result = {}
     try:
-        url = "https://emweb.securities.eastmoney.com/PC_HKF10/CorporateEvents/GetFHSPList"
-        params = {"code": hk_code}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": f"https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code={hk_code}",
-            "Accept": "application/json, text/plain, */*",
-        }
-        resp = requests.get(url, params=params, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            logger.warning(f"获取H股分红数据失败: HTTP {resp.status_code}")
+        from cninfo_api import get_api, CninfoAPI
+        from config import config
+
+        if not config.is_credential_set():
+            logger.warning("未配置巨潮资讯API凭证，无法获取H股派息日")
+            _h_payment_date_cache[cache_key] = result  # type: ignore
             return result
 
-        data = resp.json()
-        if not data:
-            return result
+        api = get_api()
+        records = api.fetch_dividend_data(stock_code)
 
-        # 解析分红派息列表
-        records = data if isinstance(data, list) else data.get("data", [])
         for item in records:
-            # 财政年度（报告期）→ 发放日（派息日）
-            fiscal_year = item.get("FiscalYear", "")  # 如 "2025"
-            payment_date = item.get("PaymentDate", "")  # 如 "2026-07-15"
-            year_end = item.get("YearEnd", "")  # 如 "2025-12-31"
-            ex_date = item.get("ExDividendDate", "")  # 除净日
-            status = item.get("Status", "")
-
             # 只取已实施的分红
-            if "实施" in str(status) or "已實施" in str(status) or status == "1":
-                # 优先使用 YearEnd，其次 FiscalYear 构造
-                period = year_end if year_end else f"{fiscal_year}-12-31"
-                if payment_date:
-                    result[period] = payment_date
+            event_proc = str(item.get("event_procedure", ""))
+            if "3131" not in event_proc and "实施" not in event_proc and "implement" not in event_proc.lower():
+                continue
 
-        logger.info(f"  H股分红派息日期 ({hk_code}): 获取到 {len(result)} 条")
+            # 获取报告期和派息日
+            end_date = item.get("end_date", "")  # 报告截止日期
+            cash_divi_date = item.get("cash_divi_date", "")  # 派息日
+
+            if end_date and cash_divi_date:
+                # 标准化日期格式
+                if len(end_date) == 8:
+                    end_date = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
+                if len(str(cash_divi_date)) == 8:
+                    cash_divi_date = f"{str(cash_divi_date)[:4]}-{str(cash_divi_date)[4:6]}-{str(cash_divi_date)[6:]}"
+                result[end_date] = cash_divi_date
+
+        logger.info(f"  巨潮资讯分红派息日 ({stock_code}): 获取到 {len(result)} 条")
     except Exception as e:
-        logger.warning(f"获取H股分红派息日期失败 ({hk_code}): {e}")
-
-    _h_payment_date_cache[cache_key] = result  # type: ignore
-    return result
-
-
-def _lookup_hk_code(a_code: str) -> str:
-    """
-    通过A股代码查找对应的H股代码
-
-    使用 cninfo 搜索API查询公司名称，然后匹配H股代码
-    """
-    if not a_code:
-        return ""
-
-    cache_key = f"hk_lookup_{a_code}"
-    if cache_key in _h_payment_date_cache:
-        return _h_payment_date_cache[cache_key]  # type: ignore
-
-    result = ""
-    try:
-        # 先通过A股代码查询公司名称
-        search_url = "http://www.cninfo.com.cn/new/information/topSearch/detailOfQuery"
-        params = {"keyWord": a_code}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "http://www.cninfo.com.cn/",
-        }
-        resp = requests.post(search_url, data=params, headers=headers, timeout=10)
-        data = resp.json()
-        items = data.get("keyBoardList") or []
-
-        # 找到公司名称后，搜索H股代码
-        company_name = ""
-        for item in items:
-            if item.get("code") == a_code:
-                company_name = item.get("zwjc", "")
-                break
-
-        if company_name:
-            # 用公司名称再次搜索，获取H股代码
-            params["keyWord"] = company_name
-            resp2 = requests.post(search_url, data=params, headers=headers, timeout=10)
-            data2 = resp2.json()
-            items2 = data2.get("keyBoardList") or []
-
-            for item in items2:
-                plate = item.get("plate", "")
-                code = item.get("code", "")
-                # H股市场标识：hk, HK, 港
-                if any(tag in str(plate).lower() for tag in ["hk", "港", "hkg"]):
-                    # 取纯数字部分
-                    result = code.split(".")[0].strip()
-                    if result and result.isdigit():
-                        break
-    except Exception as e:
-        logger.debug(f"查找 {a_code} H股代码失败: {e}")
+        logger.warning(f"巨潮资讯获取派息日失败 ({stock_code}): {e}")
 
     _h_payment_date_cache[cache_key] = result  # type: ignore
     return result
