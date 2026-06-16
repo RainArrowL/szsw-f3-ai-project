@@ -265,16 +265,21 @@ def fetch_data():
     if start_year > end_year:
         start_year, end_year = end_year, start_year
 
-    # 解析企业列表
+    # 解析企业列表：文件上传优先，文本输入作为后备
     companies = []
-    if text_input:
-        companies = parse_companies_from_text(text_input)
-    # 如果有文件上传，覆盖文本输入
     if 'file' in request.files:
         file = request.files['file']
-        if file and file.filename and allowed_file(file.filename):
-            content = file.read().decode('utf-8')
-            companies = parse_companies_from_text(content)
+        if file and file.filename:
+            try:
+                content = file.read().decode('utf-8')
+                file_companies = parse_companies_from_text(content)
+                if file_companies:
+                    companies = file_companies
+            except Exception as e:
+                logger.warning(f"读取上传文件失败: {e}")
+    # 如果没有从文件获得到企业，则使用文本输入
+    if not companies and text_input:
+        companies = parse_companies_from_text(text_input)
 
     if not companies:
         return jsonify({'success': False, 'error': '请输入至少一个企业'}), 400

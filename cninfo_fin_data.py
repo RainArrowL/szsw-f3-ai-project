@@ -9,7 +9,6 @@
 
 import time
 import logging
-from collections import defaultdict
 from typing import Dict, List, Optional, Tuple, Any
 from cninfo_api import CninfoAPI, get_api
 
@@ -368,86 +367,145 @@ REPORT_NAMES_CN = {
     "cashflow": "现金流量表",
 }
 
-# 长期股权投资附注 - 数据源1: 资产负债表（RPT_DMSK_FN_BALANCE）
-# 注意：该API仅提供汇总数据，不含 LONG_EQUITY_INVEST 明细字段
-NOTES_BALANCE_FIELDS_CN = {
+# 财务报表附注（Notes）字段映射 - 完整版
+# 数据源: 东方财富主要财务指标 API（RPT_F10_FINANCE_MAINFINADATA）
+NOTES_FIELDS_CN = {
+    # 基本信息
     "SECUCODE": "证券代码",
     "SECURITY_CODE": "股票代码",
     "SECURITY_NAME_ABBR": "证券简称",
     "ORG_CODE": "机构代码",
     "REPORT_DATE": "报告日期",
     "NOTICE_DATE": "公告日期",
+    "REPORT_TYPE": "报告类型",
+    "INDUSTRY_CODE": "行业代码",
+    "INDUSTRY_NAME": "行业名称",
+    "MARKET": "交易市场",
+    # 资产负债表 - 资产
     "TOTAL_ASSETS": "资产总计",
-    "TOTAL_EQUITY": "股东权益合计",
-    "TOTAL_LIABILITIES": "负债合计",
-    "AVAILABLE_SALE_FINASSET": "可供出售金融资产",
-    "FIXED_ASSET": "固定资产",
+    "MONETARYFUNDS": "货币资金",
     "ACCOUNTS_RECE": "应收账款",
     "INVENTORY": "存货",
-    "MONETARYFUNDS": "货币资金",
-}
-
-# 长期股权投资附注 - 数据源2: 利润表（RPT_DMSK_FN_INCOME）
-NOTES_INCOME_FIELDS_CN = {
-    "SECUCODE": "证券代码",
-    "SECURITY_CODE": "股票代码",
-    "SECURITY_NAME_ABBR": "证券简称",
-    "REPORT_DATE": "报告日期",
-    "NOTICE_DATE": "公告日期",
+    "FIXED_ASSET": "固定资产",
+    "AVAILABLE_SALE_FINASSET": "可供出售金融资产",
+    "CASH_DEPOSIT_PBC": "现金及存放央行款项",
+    "LOAN_ADVANCE": "发放贷款及垫款",
+    "ADVANCE_RECEIVABLES": "预收款项",
+    "ACCOUNTS_PAYABLE": "应付账款",
+    "SHORT_LOAN": "短期借款",
+    "SETTLE_EXCESS_RESERVE": "结算备付金",
+    "BORROW_FUND": "拆入资金",
+    "AGENT_TRADE_SECURITY": "代理买卖证券款",
+    "PREMIUM_RECE": "应收保费",
+    "ADVANCE_PREMIUM": "预收保费",
+    "LOAN_PBC": "向央行借款",
+    "ACCEPT_DEPOSIT": "吸收存款",
+    "SELL_REPO_FINASSET": "卖出回购金融资产款",
+    "TOTAL_NONCUR_ASSETS": "非流动资产合计",
+    "TOTAL_CUR_LIAB": "流动负债合计",
+    "TOTAL_NONCUR_LIAB": "非流动负债合计",
+    # 资产负债表 - 负债与权益
+    "TOTAL_LIABILITIES": "负债合计",
+    "TOTAL_EQUITY": "股东权益合计",
+    # 利润表
     "TOTAL_OPERATE_INCOME": "营业总收入",
+    "TOTAL_OPERATE_COST": "营业总成本",
+    "OPERATE_COST": "营业成本",
+    "OPERATE_EXPENSE": "营业支出",
+    "SALE_EXPENSE": "销售费用",
+    "MANAGE_EXPENSE": "管理费用",
+    "FINANCE_EXPENSE": "财务费用",
     "OPERATE_PROFIT": "营业利润",
     "TOTAL_PROFIT": "利润总额",
     "NETPROFIT": "净利润",
-    "PARENT_NETPROFIT": "归母净利润",
-    "INVEST_INCOME": "投资收益",
+    "INCOME_TAX": "所得税费用",
+    "PARENT_NETPROFIT": "归属于母公司股东的净利润",
+    "MINORITY_INTEREST": "少数股东损益",
     "BASIC_EPS": "基本每股收益",
-}
-
-# 长期股权投资附注 - 数据源3: 现金流量表（RPT_DMSK_FN_CASHFLOW）
-# 投资活动现金流部分，与长期股权投资直接相关
-NOTES_CASHFLOW_FIELDS_CN = {
-    "SECUCODE": "证券代码",
-    "SECURITY_CODE": "股票代码",
-    "SECURITY_NAME_ABBR": "证券简称",
-    "REPORT_DATE": "报告日期",
-    "NOTICE_DATE": "公告日期",
-    # 投资活动现金流入
+    "DILUTED_EPS": "稀释每股收益",
+    "INVEST_INCOME": "投资收益",
+    "OPERATE_TAX_ADD": "税金及附加",
+    "SUM_CI": "综合收益总额",
+    "OPERATE_INCOME": "营业收入",
+    "INTEREST_NI": "利息净收入",
+    "FEE_COMMISSION_NI": "手续费及佣金净收入",
+    "DEDUCT_PARENT_NETPROFIT": "扣非归属母公司净利润",
+    "EARNED_PREMIUM": "已赚保费",
+    "SURRENDER_VALUE": "退保金",
+    "COMPENSATE_EXPENSE": "赔付支出",
+    # 现金流量表
+    "NETCASH_OPERATE": "经营活动产生的现金流量净额",
+    "NETCASH_INVEST": "投资活动产生的现金流量净额",
+    "NETCASH_FINANCE": "筹资活动产生的现金流量净额",
+    "SALES_SERVICES": "销售商品、提供劳务收到的现金",
+    "PAY_STAFF_CASH": "支付给职工以及为职工支付的现金",
     "RECEIVE_INVEST_INCOME": "取得投资收益收到的现金",
-    # 投资活动现金流出
     "CONSTRUCT_LONG_ASSET": "购建长期资产支付的现金",
     "INVEST_PAY_CASH": "投资支付的现金",
-    # 投资活动净额
-    "NETCASH_INVEST": "投资活动产生的现金流量净额",
-    # 筹资活动
-    "NETCASH_FINANCE": "筹资活动产生的现金流量净额",
-    # 经营活动
-    "NETCASH_OPERATE": "经营活动产生的现金流量净额",
-}
-
-# 长期股权投资附注 - 数据源4: 主要财务指标（RPT_F10_FINANCE_MAINFINADATA）
-NOTES_MAIN_FIELDS_CN = {
-    "SECUCODE": "证券代码",
-    "SECURITY_CODE": "股票代码",
-    "SECURITY_NAME_ABBR": "证券简称",
-    "REPORT_DATE": "报告日期",
-    "REPORT_TYPE": "报告类型",
-    "NOTICE_DATE": "公告日期",
-    # 每股指标
+    "CCE_ADD": "现金及现金等价物净增加额",
+    "BEGIN_CCE": "期初现金及现金等价物余额",
+    "END_CCE": "期末现金及现金等价物余额",
+    "CUSTOMER_DEPOSIT_ADD": "客户存款净增加额",
+    "DEPOSIT_IOFI_OTHER": "存放同业和拆出资金净增加额",
+    "LOAN_ADVANCE_ADD": "发放贷款及垫款净增加额",
+    "RECEIVE_INTEREST_COMMISSION": "收取利息和手续费净增加额",
+    "RECEIVE_ORIGIC_PREMIUM": "收到原保险合同保费",
+    "PAY_ORIGIC_COMPENSATE": "支付原保险合同赔付款项",
+    # 主要财务指标
     "EPSJB": "基本每股收益(元)",
     "BPS": "每股净资产(元)",
-    # 投资相关
     "NETCASH_INVEST_PK": "投资活动现金流净额(元)",
     "OPERATE_INCOME_PK": "营业总收入(元)",
     "PARENTNETPROFIT": "归母净利润(元)",
     "TOTAL_ASSETS_PK": "资产总计(元)",
     "TOTAL_EQUITY_PK": "股东权益合计(元)",
-}
-
-# 合并时跳过的元数据字段（在 NOTES 中也需要跳过）
-SKIP_NOTES_META = {
-    "SECUCODE", "SECURITY_CODE", "SECURITY_NAME_ABBR", "ORG_CODE",
-    "REPORT_DATE", "NOTICE_DATE", "UPDATE_DATE", "CURRENCY", "IS_BZ",
-    "SECURITY_TYPE_CODE",
+    # 财务比率
+    "CURRENT_RATIO": "流动比率",
+    "DEBT_ASSET_RATIO": "资产负债率",
+    "MONETARYFUNDS_RATIO": "货币资金同比",
+    "ACCOUNTS_RECE_RATIO": "应收账款同比",
+    "INVENTORY_RATIO": "存货同比",
+    "TOTAL_ASSETS_RATIO": "资产总计同比",
+    "TOTAL_LIAB_RATIO": "负债合计同比",
+    "TOTAL_EQUITY_RATIO": "股东权益合计同比",
+    "TOI_RATIO": "营业总收入同比",
+    "TOE_RATIO": "营业总成本同比",
+    "OPERATE_PROFIT_RATIO": "营业利润同比",
+    "PARENT_NETPROFIT_RATIO": "归属母公司净利润同比",
+    "DPN_RATIO": "扣非归属母公司净利润同比",
+    "NETCASH_OPERATE_RATIO": "经营活动现金流同比",
+    "NETCASH_INVEST_RATIO": "投资活动现金流同比",
+    "NETCASH_FINANCE_RATIO": "筹资活动现金流同比",
+    "SALES_SERVICES_RATIO": "销售商品提供劳务收到的现金同比",
+    "PSC_RATIO": "支付给职工的现金同比",
+    "RII_RATIO": "取得投资收益收到的现金同比",
+    "CLA_RATIO": "购建长期资产支付的现金同比",
+    "CCE_ADD_RATIO": "现金及现金等价物净增加额同比",
+    "BEGIN_CCE_RATIO": "期初现金同比",
+    "END_CCE_RATIO": "期末现金同比",
+    "INTEREST_NI_RATIO": "利息净收入同比",
+    "FCN_RATIO": "手续费及佣金净收入同比",
+    "CDP_RATIO": "现金及存放央行款项同比",
+    "LOAN_ADVANCE_RATIO": "发放贷款及垫款同比",
+    "ASF_RATIO": "可供出售金融资产同比",
+    "LOAN_PBC_RATIO": "向央行借款同比",
+    "ACCEPT_DEPOSIT_RATIO": "吸收存款同比",
+    "SRF_RATIO": "卖出回购金融资产款同比",
+    "SER_RATIO": "结算备付金同比",
+    "BORROW_FUND_RATIO": "拆入资金同比",
+    "ATS_RATIO": "代理买卖证券款同比",
+    "PREMIUM_RECE_RATIO": "应收保费同比",
+    "SHORT_LOAN_RATIO": "短期借款同比",
+    "ADVANCE_PREMIUM_RATIO": "预收保费同比",
+    "EARNED_PREMIUM_RATIO": "已赚保费同比",
+    "OPERATE_EXPENSE_RATIO": "营业支出同比",
+    "IPC_RATIO": "投资支付的现金同比",
+    "CDA_RATIO": "客户存款净增加额同比",
+    "DIO_RATIO": "存放同业和拆出资金同比",
+    "LAA_RATIO": "发放贷款及垫款净增加额同比",
+    "RIC_RATIO": "收取利息和手续费同比",
+    "ROP_RATIO": "收到原保险合同保费同比",
+    "POC_RATIO": "支付原保险合同赔付款项同比",
 }
 
 
@@ -540,91 +598,24 @@ class FinancialDataFetcher:
         end_year: int,
     ) -> List[Dict]:
         """
-        获取单个公司指定年份范围的附注（长期股权投资相关）数据
+        获取单个公司指定年份范围的财务报表附注数据
 
-        数据来源（东方财富公开API）:
-        1. RPT_DMSK_FN_CASHFLOW - 现金流量表（投资活动现金流：取得投资收益、购建长期资产、
-           投资支付现金、投资活动净额等）
-        2. RPT_DMSK_FN_INCOME - 利润表（投资收益）
-        3. RPT_F10_FINANCE_MAINFINADATA - 主要财务指标（每股收益、每股净资产、投资现金流等）
-        4. RPT_DMSK_FN_BALANCE - 资产负债表（资产总计、股东权益合计等汇总指标）
+        数据源: 东方财富主要财务指标 API（RPT_F10_FINANCE_MAINFINADATA）
+        包含资产负债表、利润表、现金流量表的核心字段及财务比率
 
         返回:
             [{中文名: 值}, ...]
         """
         import requests as req
-        logger.info(f"正在获取 {stock_code} 的长期股权投资附注...")
+        logger.info(f"正在获取 {stock_code} 的财务报表附注...")
 
-        year_data: Dict[str, Dict] = defaultdict(dict)
-
-        # 数据源1: 现金流量表 - 投资活动现金流（与长期股权投资最直接相关）
-        self._fetch_notes_source(
-            stock_code, start_year, end_year,
-            report_name="RPT_DMSK_FN_CASHFLOW",
-            field_map=NOTES_CASHFLOW_FIELDS_CN,
-            year_data=year_data,
-        )
-
-        # 数据源2: 利润表 - 投资收益
-        self._fetch_notes_source(
-            stock_code, start_year, end_year,
-            report_name="RPT_DMSK_FN_INCOME",
-            field_map=NOTES_INCOME_FIELDS_CN,
-            year_data=year_data,
-        )
-
-        # 数据源3: 资产负债表 - 资产总计等汇总数据
-        self._fetch_notes_source(
-            stock_code, start_year, end_year,
-            report_name="RPT_DMSK_FN_BALANCE",
-            field_map=NOTES_BALANCE_FIELDS_CN,
-            year_data=year_data,
-        )
-
-        # 数据源4: 主要财务指标 - 每股指标等
-        self._fetch_notes_source(
-            stock_code, start_year, end_year,
-            report_name="RPT_F10_FINANCE_MAINFINADATA",
-            field_map=NOTES_MAIN_FIELDS_CN,
-            year_data=year_data,
-        )
-
-        # 合并为记录列表
         all_records = []
-        for report_date, merged in sorted(year_data.items(), reverse=True):
-            merged["REPORT_DATE"] = report_date
-            year = report_date[:4]
-            merged["报告年度"] = year
-            if report_date.endswith("-12-31"):
-                merged["报告类型"] = "年报"
-            elif report_date.endswith("-06-30"):
-                merged["报告类型"] = "中报"
-            elif report_date.endswith("-03-31"):
-                merged["报告类型"] = "一季报"
-            elif report_date.endswith("-09-30"):
-                merged["报告类型"] = "三季报"
-            all_records.append(merged)
-
-        logger.info(f"  {stock_code} 长期股权投资附注: {len(all_records)} 条")
-        return all_records
-
-    def _fetch_notes_source(
-        self,
-        stock_code: str,
-        start_year: int,
-        end_year: int,
-        report_name: str,
-        field_map: Dict[str, str],
-        year_data: Dict[str, Dict],
-    ):
-        """从指定报表获取附注数据并合并到 year_data"""
-        import requests as req
+        page = 1
 
         try:
-            page = 1
             while True:
                 params = {
-                    "reportName": report_name,
+                    "reportName": "RPT_F10_FINANCE_MAINFINADATA",
                     "columns": "ALL",
                     "pageNumber": page,
                     "pageSize": 50,
@@ -657,11 +648,21 @@ class FinancialDataFetcher:
                         continue
                     year = int(str(report_date)[:4])
                     if start_year <= year <= end_year:
+                        translated = {}
                         for key, value in item.items():
-                            if key in field_map:
-                                cn_key = field_map[key]
-                                if value is not None and value != "":
-                                    year_data[report_date][cn_key] = value
+                            cn_key = NOTES_FIELDS_CN.get(key, key)
+                            if value is not None and value != "":
+                                translated[cn_key] = value
+                        translated["报告年度"] = year
+                        if report_date.endswith("-12-31"):
+                            translated["报告类型"] = "年报"
+                        elif report_date.endswith("-06-30"):
+                            translated["报告类型"] = "中报"
+                        elif report_date.endswith("-03-31"):
+                            translated["报告类型"] = "一季报"
+                        elif report_date.endswith("-09-30"):
+                            translated["报告类型"] = "三季报"
+                        all_records.append(translated)
 
                 total_pages = data["result"].get("pages", 1)
                 if page >= total_pages:
@@ -669,11 +670,10 @@ class FinancialDataFetcher:
                 page += 1
 
         except Exception as e:
-            logger.warning(f"获取 {stock_code} {report_name} 失败: {e}")
+            logger.warning(f"获取 {stock_code} 财务报表附注失败: {e}")
 
-    def _translate_notes(self, raw: Dict) -> Dict:
-        """将附注原始字段翻译为中文（已废弃，保留兼容）"""
-        return raw
+        logger.info(f"  {stock_code} 财务报表附注: {len(all_records)} 条")
+        return all_records
 
     def fetch_multiple_companies(
         self,

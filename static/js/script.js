@@ -267,12 +267,18 @@ function showFileInfo(file) {
     uploadContent.style.display = 'none';
     fileInfoDiv.style.display = 'flex';
     fileNameSpan.textContent = file.name;
+    // 上传文件时清空文本输入框，避免默认名单干扰
+    textInput.value = '';
 }
 
 function removeFile() {
     fileInput.value = '';
     uploadContent.style.display = '';
     fileInfoDiv.style.display = 'none';
+    // 恢复默认名单
+    if (!textInput.value.trim()) {
+        textInput.value = DEFAULT_COMPANIES;
+    }
 }
 
 uploadArea.addEventListener('dragover', (e) => {
