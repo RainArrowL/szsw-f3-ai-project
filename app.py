@@ -100,23 +100,32 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             all_company_data = {}
             company_industries = {}
 
-            for idx, (code, name) in enumerate(resolved):
+            for idx, (code, name, org_id) in enumerate(resolved):
+                is_non_listed = bool(org_id and not code)
+                if is_non_listed:
+                    company_display = f"{name}(非上市:{org_id})"
+                    ind_key = org_id or name
+                else:
+                    company_display = f"{name}({code})"
+                    ind_key = code
                 current = idx + 1
-                company_display = f"{name}({code})"
                 task['progress']['current'] = current
                 task['progress']['message'] = f"正在获取: {company_display}"
 
                 logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
 
-                data = fetcher.fetch_company_data(code, start_year, end_year)
+                data = fetcher.fetch_company_data(code, start_year, end_year, org_id=org_id)
                 all_company_data[company_display] = data
 
                 # 获取行业信息
-                ind = get_company_industry(code)
-                if ind and ind[1]:
-                    company_industries[code] = ind[1]
+                if code:
+                    ind = get_company_industry(code)
+                    if ind and ind[1]:
+                        company_industries[ind_key] = ind[1]
+                    else:
+                        company_industries[ind_key] = "其他"
                 else:
-                    company_industries[code] = "其他"
+                    company_industries[ind_key] = "其他"
 
                 time.sleep(0.5)
 
@@ -138,15 +147,19 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
 
         else:
             # ========== 分企业模式：每个企业单独Excel ==========
-            for idx, (code, name) in enumerate(resolved):
+            for idx, (code, name, org_id) in enumerate(resolved):
+                is_non_listed = bool(org_id and not code)
+                if is_non_listed:
+                    company_display = f"{name}(非上市:{org_id})"
+                else:
+                    company_display = f"{name}({code})"
                 current = idx + 1
-                company_display = f"{name}({code})"
                 task['progress']['current'] = current
                 task['progress']['message'] = f"正在获取: {company_display}"
 
                 logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
 
-                data = fetcher.fetch_company_data(code, start_year, end_year)
+                data = fetcher.fetch_company_data(code, start_year, end_year, org_id=org_id)
 
                 # 写入Excel（企业自身数据，不含行业均值）
                 filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
@@ -169,7 +182,10 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             # 收集各企业的行业信息，按行业去重
             industry_map: Dict[str, Tuple[str, str, List[str]]] = {}  # ind_name -> (ind_code, ind_name, [codes])
 
-            for code, name in resolved:
+            for code, name, org_id in resolved:
+                # 非上市公司跳过行业均值
+                if not code:
+                    continue
                 ind = get_company_industry(code)
                 if ind and ind[1]:
                     ind_code, ind_name = ind
@@ -524,7 +540,16 @@ def process_dividend_task(task_id: str, start_year: int, end_year: int, raw_comp
         if not resolved:
             raise ValueError("未能解析任何企业，请检查企业名单")
 
-        stock_codes = [code for code, _ in resolved]
+        # 过滤：分红数据仅适用于上市公司
+        stock_codes = []
+        for code, name, org_id in resolved:
+            if code:
+                stock_codes.append(code)
+            else:
+                logger.warning(f"分红任务跳过非上市公司: {name}")
+
+        if not stock_codes:
+            raise ValueError("名单中没有上市公司，分红公告仅支持上市公司")
         task['progress']['total'] = len(stock_codes)
         task['progress']['message'] = f"共解析 {len(stock_codes)} 家企业，开始获取分红数据..."
 

@@ -527,14 +527,16 @@ class FinancialDataFetcher:
         stock_code: str,
         start_year: int,
         end_year: int,
+        org_id: str = "",
     ) -> Dict[str, Dict[str, list]]:
         """
         获取单个公司指定年份范围的三大财务报表数据
 
         参数:
-            stock_code: 股票代码
+            stock_code: 股票代码（非上市公司可为空字符串）
             start_year: 开始年份
             end_year: 截止年份
+            org_id: 机构ID（非上市公司使用，替代 stock_code）
 
         返回:
             {
@@ -545,18 +547,20 @@ class FinancialDataFetcher:
         """
         start_date = f"{start_year}-01-01"
         end_date = f"{end_year}-12-31"
+        is_non_listed = bool(org_id and not stock_code)
 
         result = {}
 
         for report_type in ["balance", "income", "cashflow"]:
             cn_name = REPORT_NAMES_CN[report_type]
-            logger.info(f"正在获取 {stock_code} 的{cn_name}数据...")
+            logger.info(f"正在获取 {stock_code or org_id} 的{cn_name}数据...")
 
             try:
                 if self._use_cninfo:
                     try:
                         records = self.api.fetch_financial_report(
-                            stock_code, report_type, start_date, end_date
+                            stock_code, report_type, start_date, end_date,
+                            org_id=org_id,
                         )
                         translated = self._translate_fields(
                             records, report_type, is_eastmoney=False
@@ -569,7 +573,13 @@ class FinancialDataFetcher:
                             f"cninfo API获取{cn_name}失败({e})，切换到免费数据源..."
                         )
 
-                # 回退到东方财富免费数据源
+                # 非上市公司没有东方财富数据，跳过回退
+                if is_non_listed:
+                    logger.warning(f"非上市公司 {org_id} 无法回退到东方财富数据源")
+                    result[cn_name] = []
+                    continue
+
+                # 回退到东方财富免费数据源（仅上市公司）
                 records = self.api.fetch_from_eastmoney(
                     stock_code, report_type, start_year, end_year
                 )
@@ -579,15 +589,18 @@ class FinancialDataFetcher:
                 result[cn_name] = translated
 
             except Exception as e:
-                logger.error(f"获取{stock_code} {cn_name}失败: {e}")
+                logger.error(f"获取{stock_code or org_id} {cn_name}失败: {e}")
                 result[cn_name] = []
 
             time.sleep(0.5)
 
-        # 获取附注（主要财务指标）
-        notes = self.fetch_company_notes(stock_code, start_year, end_year)
-        if notes:
-            result["附注"] = notes
+        # 获取附注（主要财务指标）- 非上市公司跳过
+        if not is_non_listed:
+            notes = self.fetch_company_notes(stock_code, start_year, end_year)
+            if notes:
+                result["附注"] = notes
+        else:
+            logger.info(f"非上市公司 {org_id} 跳过附注获取（东方财富数据源不支持）")
 
         return result
 
@@ -677,7 +690,7 @@ class FinancialDataFetcher:
 
     def fetch_multiple_companies(
         self,
-        stock_codes: List[Tuple[str, str]],
+        stock_codes: List[Tuple[str, str, str]],
         start_year: int,
         end_year: int,
         progress_callback=None,
@@ -686,7 +699,8 @@ class FinancialDataFetcher:
         批量获取多个公司的财务数据
 
         参数:
-            stock_codes: [(股票代码, 公司名称), ...]
+            stock_codes: [(股票代码, 公司名称, 机构ID), ...]
+                        非上市公司 code 可为空，orgId 必填
             start_year: 开始年份
             end_year: 截止年份
             progress_callback: 进度回调函数
@@ -697,14 +711,18 @@ class FinancialDataFetcher:
         all_data = {}
         total = len(stock_codes)
 
-        for idx, (code, name) in enumerate(stock_codes):
-            display_name = f"{name}({code})"
+        for idx, (code, name, org_id) in enumerate(stock_codes):
+            is_non_listed = bool(org_id and not code)
+            if is_non_listed:
+                display_name = f"{name}(非上市:{org_id})"
+            else:
+                display_name = f"{name}({code})"
             logger.info(f"正在处理 {idx + 1}/{total}: {display_name}")
 
             if progress_callback:
                 progress_callback(idx + 1, total, display_name)
 
-            data = self.fetch_company_data(code, start_year, end_year)
+            data = self.fetch_company_data(code, start_year, end_year, org_id=org_id)
             all_data[display_name] = data
 
         return all_data
@@ -767,11 +785,13 @@ def get_fetcher() -> FinancialDataFetcher:
 
 def resolve_companies(companies: list) -> list:
     """
-    解析企业名单，返回 (股票代码, 公司名称) 列表
+    解析企业名单，返回 (股票代码, 公司名称, 机构ID) 列表
 
     自动识别：
     - 纯数字 -> 股票代码
-    - 非纯数字 -> 公司名称（搜索获取代码）
+    - 非纯数字 -> 公司名称（搜索获取代码和机构ID）
+
+    非上市公司：通过 cninfo 搜索获取 orgId，code 可能为空
     """
     fetcher = FinancialDataFetcher()
     resolved = []
@@ -785,18 +805,21 @@ def resolve_companies(companies: list) -> list:
             try:
                 results = fetcher.get_stock_info(code)
                 if results:
-                    resolved.append((results[0]["code"], results[0]["name"]))
+                    resolved.append((results[0]["code"], results[0]["name"], results[0].get("orgId", "")))
                 else:
-                    resolved.append((code, code))
+                    resolved.append((code, code, ""))
             except Exception:
-                resolved.append((code, code))
+                resolved.append((code, code, ""))
         else:
             # 视为公司名称
             try:
                 results = fetcher.get_stock_info(item)
                 if results:
                     best = results[0]
-                    resolved.append((best["code"], best["name"]))
+                    resolved.append((best.get("code", ""), best["name"], best.get("orgId", "")))
+                else:
+                    # 搜索不到的公司，尝试直接作为名称（无代码，无 orgId）
+                    resolved.append(("", item, ""))
             except Exception:
                 pass  # 跳过无法识别的
 

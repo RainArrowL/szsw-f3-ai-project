@@ -167,15 +167,17 @@ class CninfoAPI:
         report_type: str,
         start_date: str,
         end_date: str,
+        org_id: str = "",
     ) -> List[Dict[str, Any]]:
         """
         获取公司财务报表数据
 
         参数:
-            stock_code: 股票代码，如 "000001" 或 "600519"
+            stock_code: 股票代码，如 "000001" 或 "600519"（非上市公司可为空字符串）
             report_type: 报表类型，"balance"/"income"/"cashflow"
             start_date: 开始日期，格式 "YYYY-MM-DD" 或 "YYYYMMDD"
             end_date: 截止日期，格式 "YYYY-MM-DD" 或 "YYYYMMDD"
+            org_id: 机构ID（非上市公司使用，替代 stock_code）
 
         返回:
             财务报表数据列表
@@ -205,6 +207,11 @@ class CninfoAPI:
                 "@limit": str(config.max_rows_per_page),
                 "@orderby": "scode:asc,f001d:asc",
             }
+            # 非上市公司：使用 orgId 替代 scode
+            if org_id and not stock_code:
+                params["scode"] = ""
+                params["orgid"] = org_id
+                params["@orderby"] = "orgid:asc,f001d:asc"
 
             result = self._api_request(url, method="POST", params=params)
 
@@ -225,7 +232,7 @@ class CninfoAPI:
             page_num += 1
             time.sleep(config.request_interval)
 
-        logger.info(f"获取{stock_code} {report_type} 报表数据: {len(all_records)} 条")
+        logger.info(f"获取{stock_code or org_id} {report_type} 报表数据: {len(all_records)} 条")
         return all_records
 
     # ==================== 备选数据源：东方财富（免费） ====================
