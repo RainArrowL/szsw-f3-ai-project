@@ -22,7 +22,7 @@ from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel, write_industry_avg_excel, write_merged_by_report_type
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
-from szse_scraper import fetch_year_data, write_szse_excel
+from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
 
 # 日志配置
@@ -477,6 +477,18 @@ def process_szse_task(task_id: str, year: int):
                 'size': file_size,
                 'display_name': f"深交所日度概况_{year}年.xlsx",
             })
+
+            # 生成周度总结TXT
+            txt_path = write_szse_weekly_summary(year, data, output_dir=config.output_dir)
+            if txt_path:
+                txt_size = os.path.getsize(txt_path) if os.path.exists(txt_path) else 0
+                task['files'].append({
+                    'name': os.path.basename(txt_path),
+                    'path': txt_path,
+                    'size': txt_size,
+                    'display_name': f"深交所周度总结_{year}年.txt",
+                })
+
             task['progress']['message'] = f"完成! {year}年共 {len(data)} 个交易日"
         else:
             raise ValueError(f"{year}年未获取到任何深交所日度概况数据")

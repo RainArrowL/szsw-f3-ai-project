@@ -277,6 +277,93 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     return filepath
 
 
+def write_szse_weekly_summary(year: int, data: List[Tuple[str, float, float]], output_dir: str = "output") -> str:
+    """
+    生成深交所周度总结TXT文件
+
+    格式: 【6月8日-12日深市印花税合计37.2亿元。（日均成交额1.49万亿元）】
+
+    印花税 = 当周成交金额合计 × 0.05%（万分之五，卖方单边征收）
+
+    参数:
+        year: 年份
+        data: [(date_str, vol_yi, amt_yi), ...]
+        output_dir: 输出目录
+
+    返回:
+        生成的TXT文件路径
+    """
+    import os
+    from datetime import date as date_type
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 按ISO周分组
+    weeks = {}
+    for d_str, vol, amt in data:
+        try:
+            dt = date_type.fromisoformat(d_str)
+        except ValueError:
+            continue
+        iso_year, iso_week, weekday = dt.isocalendar()
+        week_key = (iso_year, iso_week)
+        if week_key not in weeks:
+            weeks[week_key] = []
+        weeks[week_key].append((dt, amt))
+
+    if not weeks:
+        logger.warning(f"{year}年无数据，无法生成周度总结")
+        return ""
+
+    lines = []
+    for (iso_year, iso_week), week_data in sorted(weeks.items()):
+        # 该周实际交易日的日期范围
+        dates = sorted(d[0] for d in week_data)
+        amts = [d[1] for d in week_data]
+        trading_days = len(amts)
+        total_amt = sum(amts)
+
+        # 印花税 = 成交额 × 0.05%（万分之五）
+        stamp_duty = round(total_amt * 0.0005, 2)
+        # 日均成交额
+        avg_daily_amt = round(total_amt / trading_days, 2) if trading_days > 0 else 0
+
+        first_date = dates[0]
+        last_date = dates[-1]
+
+        # 格式化日期范围
+        if first_date.month == last_date.month:
+            date_range = f"{first_date.month}月{first_date.day}日-{last_date.day}日"
+        else:
+            date_range = f"{first_date.month}月{first_date.day}日-{last_date.month}月{last_date.day}日"
+
+        # 格式化金额
+        def fmt_yi(val):
+            """格式化为亿元或万亿元"""
+            if val >= 10000:
+                return f"{val / 10000:.2f}万亿元"
+            return f"{val:.2f}亿元"
+
+        line = f"【{date_range}深市印花税合计{stamp_duty}亿元。（日均成交额{fmt_yi(avg_daily_amt)}）】"
+        lines.append(line)
+
+    if not lines:
+        return ""
+
+    # 写入文件
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"深交所周度总结_{year}年_{timestamp}.txt"
+    filepath = os.path.join(output_dir, filename)
+
+    content = "\n".join(lines)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    logger.info(f"周度总结TXT已保存: {filepath} ({len(lines)}周)")
+    return filepath
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 

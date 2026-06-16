@@ -482,10 +482,11 @@ def write_dividend_excel(
     ws.column_dimensions["E"].width = 10
     ws.column_dimensions["F"].width = 14
     ws.column_dimensions["G"].width = 16
-    ws.column_dimensions["H"].width = 14
-    ws.column_dimensions["I"].width = 18
-    ws.column_dimensions["J"].width = 20
+    ws.column_dimensions["H"].width = 18
+    ws.column_dimensions["I"].width = 14
+    ws.column_dimensions["J"].width = 18
     ws.column_dimensions["K"].width = 20
+    ws.column_dimensions["L"].width = 20
 
     # 冻结
     ws.freeze_panes = "A3"
