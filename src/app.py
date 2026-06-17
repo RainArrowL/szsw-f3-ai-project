@@ -6,11 +6,16 @@ Web界面 - Flask后端服务
 """
 
 import os
+import sys
 import re
 import uuid
 import time
 import logging
 import threading
+
+# 确保 src/ 目录在 sys.path 中，支持从项目根目录启动
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from datetime import datetime
 from functools import wraps
 from typing import Dict, List, Optional, Tuple
@@ -34,7 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 初始化Flask
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder="../web/templates", static_folder="../web/static")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'annual-report-fetcher-secret')
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 最大1MB文件
 
