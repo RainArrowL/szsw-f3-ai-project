@@ -6,7 +6,6 @@
 
 // ==================== 常量 ====================
 const POLL_INTERVAL = 1500;
-const MAX_POLL_TIME = 10 * 60 * 1000;
 
 // 默认企业名单
 const DEFAULT_COMPANIES = `平安银行股份有限公司
@@ -55,7 +54,6 @@ function createTaskModule(cfg) {
     };
 
     let pollTimer = null;
-    let pollStartedAt = 0;
 
     function setDisabled(disabled) {
         els.submitBtn.disabled = disabled;
@@ -135,7 +133,6 @@ function createTaskModule(cfg) {
     }
 
     function pollProgress(taskId) {
-        pollStartedAt = Date.now();
 
         pollTimer = setInterval(async () => {
             try {
@@ -159,12 +156,6 @@ function createTaskModule(cfg) {
                 } else if (task.status === 'error') {
                     clearInterval(pollTimer);
                     showError(task.error || '处理失败');
-                    setDisabled(false);
-                }
-
-                if (Date.now() - pollStartedAt > MAX_POLL_TIME) {
-                    clearInterval(pollTimer);
-                    showError('处理超时，请检查服务器状态');
                     setDisabled(false);
                 }
             } catch (err) {
@@ -267,12 +258,18 @@ function showFileInfo(file) {
     uploadContent.style.display = 'none';
     fileInfoDiv.style.display = 'flex';
     fileNameSpan.textContent = file.name;
+    // 上传文件时清空文本输入框，避免默认名单干扰
+    textInput.value = '';
 }
 
 function removeFile() {
     fileInput.value = '';
     uploadContent.style.display = '';
     fileInfoDiv.style.display = 'none';
+    // 恢复默认名单
+    if (!textInput.value.trim()) {
+        textInput.value = DEFAULT_COMPANIES;
+    }
 }
 
 uploadArea.addEventListener('dragover', (e) => {

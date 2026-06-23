@@ -1,2 +1,6 @@
-# szsw-f3-ai-project
-A project created by Trae AI.
+# 征收管理科AI作品
+## 4大功能
+1. 年报财务数据获取
+2. 公募基金管理人名录获取
+3. 深交所日度概况获取
+4. 分红公告获取

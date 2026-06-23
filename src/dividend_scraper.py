@@ -32,6 +32,8 @@ HEADERS = {
 
 # A股/H股股本缓存
 _share_count_cache: Dict[str, Optional[Tuple[int, int]]] = {}
+# H股派息日缓存：key = A股代码+报告年份，value = H股派息日
+_h_payment_date_cache: Dict[str, str] = {}
 
 
 def _get_ah_share_counts(code: str) -> Optional[Tuple[int, int]]:
@@ -167,7 +169,48 @@ def fetch_dividend_data(
             record["A_SHARE_AMOUNT"] = record["TOTAL_AMOUNT"]
             record["H_SHARE_AMOUNT"] = 0
 
-    return all_records, not_found
+    # 为有H股的公司补充H股红利派发日期（免费，东方财富PC_HKF10）
+    if progress_callback:
+        progress_callback(0, 0, "正在获取H股红利派发日期...")
+
+    # 按A股代码去重，避免重复查询
+    a_codes = list(set(r["SECURITY_CODE"] for r in all_records if _get_ah_share_counts(r["SECURITY_CODE"])))
+    hk_dates_cache: Dict[str, Dict[str, str]] = {}
+
+    for a_code in a_codes:
+        hk_dates_cache[a_code] = _fetch_hk_dividend_dates(a_code)
+        if hk_dates_cache[a_code]:
+            logger.info(f"  {a_code}: 获取到 {len(hk_dates_cache[a_code])} 条派息日")
+        else:
+            logger.info(f"  {a_code}: 未获取到H股派息日")
+        time.sleep(0.3)
+
+    # 填充分红记录的H股派息日
+    for record in all_records:
+        a_code = record["SECURITY_CODE"]
+        if a_code in hk_dates_cache:
+            report_period = record.get("REPORT_PERIOD", "")
+            if report_period and report_period in hk_dates_cache[a_code]:
+                record["H_PAYMENT_DATE"] = hk_dates_cache[a_code][report_period]
+
+    # 获取H股分红公告列表（用于H股分红公告Sheet）
+    hk_list_data: List[Tuple[str, str, List[Dict]]] = []
+    if progress_callback:
+        progress_callback(0, 0, "正在获取H股分红公告...")
+
+    for a_code in a_codes:
+        hk_list = _fetch_hk_dividend_list(a_code)
+        if hk_list:
+            # 获取公司名称
+            company_name = ""
+            for r in all_records:
+                if r["SECURITY_CODE"] == a_code:
+                    company_name = r.get("SECURITY_NAME", "")
+                    break
+            hk_list_data.append((a_code, company_name, hk_list))
+        time.sleep(0.3)
+
+    return all_records, hk_list_data, not_found
 
 
 def _fetch_single_stock(code: str, start_year: int, end_year: int) -> List[Dict]:
@@ -244,6 +287,179 @@ def _fetch_single_stock(code: str, start_year: int, end_year: int) -> List[Dict]
     return records
 
 
+def _lookup_hk_code(a_code: str) -> str:
+    """
+    通过A股代码查找对应的H股代码
+
+    使用 cninfo 公开搜索API（无需凭证），先搜A股代码获取公司名，再搜公司名获取H股代码
+
+    返回:
+        H股代码（纯数字字符串），未找到返回空串
+    """
+    if not a_code:
+        return ""
+
+    cache_key = f"hk_lookup_{a_code}"
+    if cache_key in _h_payment_date_cache:
+        return _h_payment_date_cache[cache_key]  # type: ignore
+
+    result = ""
+    try:
+        search_url = "http://www.cninfo.com.cn/new/information/topSearch/detailOfQuery"
+        params = {"keyWord": a_code}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "http://www.cninfo.com.cn/",
+        }
+        resp = requests.post(search_url, data=params, headers=headers, timeout=10)
+        data = resp.json()
+        items = data.get("keyBoardList") or []
+
+        company_name = ""
+        for item in items:
+            if item.get("code") == a_code:
+                company_name = item.get("zwjc", "")
+                break
+
+        if company_name:
+            params["keyWord"] = company_name
+            resp2 = requests.post(search_url, data=params, headers=headers, timeout=10)
+            data2 = resp2.json()
+            items2 = data2.get("keyBoardList") or []
+
+            for item in items2:
+                plate = item.get("plate", "")
+                code = item.get("code", "")
+                if any(tag in str(plate).lower() for tag in ["hk", "港", "hkg"]):
+                    result = code.split(".")[0].strip()
+                    if result and result.isdigit():
+                        break
+    except Exception as e:
+        logger.debug(f"查找 {a_code} H股代码失败: {e}")
+
+    _h_payment_date_cache[cache_key] = result  # type: ignore
+    return result
+
+
+def _fetch_hk_dividend_dates(a_code: str) -> Dict[str, str]:
+    """
+    获取H股红利派发日期（免费，东方财富 PC_HKF10 API）
+
+    流程:
+    1. 通过 cninfo 公开搜索找到 H 股代码
+    2. 请求东方财富 PC_HKF10 获取分红派息列表，解析发放日
+
+    返回: {报告期: 发放日, ...}  如 {"2025-12-31": "2026-07-15"}
+    """
+    if not a_code:
+        return {}
+
+    hk_code = _lookup_hk_code(a_code)
+    if not hk_code:
+        return {}
+
+    cache_key = f"hk_dividend_{hk_code}"
+    if cache_key in _h_payment_date_cache:
+        return _h_payment_date_cache[cache_key]  # type: ignore
+
+    result = {}
+    try:
+        url = "https://emweb.securities.eastmoney.com/PC_HKF10/CorporateEvents/GetFHSPList"
+        params = {"code": hk_code}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": f"https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code={hk_code}",
+            "Accept": "application/json, text/plain, */*",
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            logger.warning(f"获取H股分红数据失败: HTTP {resp.status_code}")
+            return result
+
+        resp_data = resp.json()
+        if not resp_data:
+            return result
+
+        records = resp_data if isinstance(resp_data, list) else resp_data.get("data", [])
+        for item in records:
+            fiscal_year = item.get("FiscalYear", "")
+            payment_date = item.get("PaymentDate", "")
+            year_end = item.get("YearEnd", "")
+            status = item.get("Status", "")
+
+            if "实施" in str(status) or "已實施" in str(status) or status == "1":
+                period = year_end if year_end else f"{fiscal_year}-12-31"
+                if payment_date:
+                    result[period] = payment_date
+
+        logger.info(f"  {a_code} → H股 {hk_code}: {len(result)} 条派息日")
+    except Exception as e:
+        logger.warning(f"获取H股分红日期失败 ({a_code}): {e}")
+
+    _h_payment_date_cache[cache_key] = result  # type: ignore
+    return result
+
+
+def _fetch_hk_dividend_list(a_code: str) -> List[Dict]:
+    """
+    获取H股分红公告列表（免费，东方财富 PC_HKF10 API）
+
+    返回:
+        [{ "FiscalYear": "2025", "YearEnd": "2025-12-31",
+           "Scheme": "末期每股派人民币1.75元", "DistributionType": "末期",
+           "ExDividendDate": "2026-06-02", "RecordDate": "2026-06-08",
+           "PaymentDate": "2026-07-15", "AnnouncementDate": "2026-03-20" }, ...]
+    """
+    if not a_code:
+        return []
+
+    hk_code = _lookup_hk_code(a_code)
+    if not hk_code:
+        return []
+
+    cache_key = f"hk_list_{hk_code}"
+    if cache_key in _h_payment_date_cache:
+        return _h_payment_date_cache[cache_key]  # type: ignore
+
+    result = []
+    try:
+        url = "https://emweb.securities.eastmoney.com/PC_HKF10/CorporateEvents/GetFHSPList"
+        params = {"code": hk_code}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": f"https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code={hk_code}",
+            "Accept": "application/json, text/plain, */*",
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return result
+
+        resp_data = resp.json()
+        if not resp_data:
+            return result
+
+        records = resp_data if isinstance(resp_data, list) else resp_data.get("data", [])
+        for item in records:
+            result.append({
+                "FiscalYear": item.get("FiscalYear", ""),
+                "YearEnd": item.get("YearEnd", ""),
+                "Scheme": item.get("Scheme", ""),
+                "DistributionType": item.get("DistributionType", ""),
+                "ExDividendDate": item.get("ExDividendDate", ""),
+                "RecordDate": item.get("RecordDate", ""),
+                "PaymentDate": item.get("PaymentDate", ""),
+                "AnnouncementDate": item.get("AnnouncementDate", ""),
+                "Status": item.get("Status", ""),
+            })
+
+        logger.info(f"  {a_code} → H股 {hk_code}: {len(result)} 条分红公告")
+    except Exception as e:
+        logger.warning(f"获取H股分红公告列表失败 ({a_code}): {e}")
+
+    _h_payment_date_cache[cache_key] = result  # type: ignore
+    return result
+
+
 def _parse_dividend_record(item: Dict) -> Optional[Dict]:
     """
     解析单条分红记录，提取关键字段
@@ -284,6 +500,7 @@ def _parse_dividend_record(item: Dict) -> Optional[Dict]:
             "REGIST_DATE": _normalize_date(item.get("EQUITY_RECORD_DATE", "")),
             "EX_DIVIDEND_DATE": _normalize_date(item.get("EX_DIVIDEND_DATE", "")),
             "PAYMENT_DATE": _normalize_date(item.get("EX_DIVIDEND_DATE", "")),  # 现金红利发放日≈除权除息日
+            "H_PAYMENT_DATE": "",  # H股红利派发日期（东方财富API暂无此字段，需人工补充）
             "CASH_DIVIDEND_PER_SHARE": round(per_share, 4),
             "TOTAL_AMOUNT": round(total_amount, 2),
             "TOTAL_SHARES": int(total_shares),  # 总股本（用于后续计算AH拆分）
@@ -348,11 +565,12 @@ def _report_year(report_date: str) -> str:
 
 
 def write_dividend_excel(
-    records: List[Dict],
-    start_year: int,
-    end_year: int,
-    output_dir: str = "output",
-) -> str:
+        records: List[Dict],
+        start_year: int,
+        end_year: int,
+        output_dir: str = "output",
+        hk_records: Optional[List[Tuple[str, str, List[Dict]]]] = None,
+    ) -> str:
     """
     将分红数据写入Excel文件
 
@@ -385,7 +603,7 @@ def write_dividend_excel(
     )
 
     # 标题行
-    ws.merge_cells("A1:K1")
+    ws.merge_cells("A1:L1")
     title_cell = ws["A1"]
     title_cell.value = f"{start_year}-{end_year}年 上市公司分红公告"
     title_cell.font = Font(name="微软雅黑", size=14, bold=True, color="8E44AD")
@@ -393,7 +611,7 @@ def write_dividend_excel(
     ws.row_dimensions[1].height = 36
 
     # 表头
-    headers = ["股票代码", "股票名称", "公告日", "报告年度", "报告类型", "股权登记日", "现金红利发放日", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
+    headers = ["股票代码", "股票名称", "公告日", "报告年度", "报告类型", "股权登记日", "现金红利发放日", "H股红利派发日期", "每股分红(元)", "分配金额(元)", "A股分配金额(元)", "H股分配金额(元)"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col_idx, value=header)
         cell.font = header_font
@@ -420,11 +638,11 @@ def write_dividend_excel(
         name = recs[0].get("SECURITY_NAME", "") if recs else ""
 
         # 分组标题行
-        ws.merge_cells(f"A{current_row}:K{current_row}")
+        ws.merge_cells(f"A{current_row}:L{current_row}")
         group_cell = ws.cell(row=current_row, column=1, value=f"{code}  {name}  ({len(recs)}条)")
         group_cell.font = group_font
         group_cell.fill = group_fill
-        for c in range(1, 12):
+        for c in range(1, 13):
             ws.cell(row=current_row, column=c).border = thin_border
         ws.row_dimensions[current_row].height = 22
         current_row += 1
@@ -451,21 +669,24 @@ def write_dividend_excel(
             ws.cell(row=current_row, column=7, value=rec.get("PAYMENT_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=7).border = thin_border
 
-            ws.cell(row=current_row, column=8, value=rec.get("CASH_DIVIDEND_PER_SHARE", 0)).alignment = cell_alignment
-            ws.cell(row=current_row, column=8).number_format = "#,##0.0000"
+            ws.cell(row=current_row, column=8, value=rec.get("H_PAYMENT_DATE", "")).alignment = cell_alignment
             ws.cell(row=current_row, column=8).border = thin_border
 
-            ws.cell(row=current_row, column=9, value=rec.get("TOTAL_AMOUNT", 0)).alignment = cell_alignment
-            ws.cell(row=current_row, column=9).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=9, value=rec.get("CASH_DIVIDEND_PER_SHARE", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=9).number_format = "#,##0.0000"
             ws.cell(row=current_row, column=9).border = thin_border
 
-            ws.cell(row=current_row, column=10, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=10, value=rec.get("TOTAL_AMOUNT", 0)).alignment = cell_alignment
             ws.cell(row=current_row, column=10).number_format = "#,##0.00"
             ws.cell(row=current_row, column=10).border = thin_border
 
-            ws.cell(row=current_row, column=11, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=11, value=rec.get("A_SHARE_AMOUNT", 0)).alignment = cell_alignment
             ws.cell(row=current_row, column=11).number_format = "#,##0.00"
             ws.cell(row=current_row, column=11).border = thin_border
+
+            ws.cell(row=current_row, column=12, value=rec.get("H_SHARE_AMOUNT", 0)).alignment = cell_alignment
+            ws.cell(row=current_row, column=12).number_format = "#,##0.00"
+            ws.cell(row=current_row, column=12).border = thin_border
 
             ws.row_dimensions[current_row].height = 20
             current_row += 1
@@ -478,13 +699,82 @@ def write_dividend_excel(
     ws.column_dimensions["E"].width = 10
     ws.column_dimensions["F"].width = 14
     ws.column_dimensions["G"].width = 16
-    ws.column_dimensions["H"].width = 14
-    ws.column_dimensions["I"].width = 18
-    ws.column_dimensions["J"].width = 20
+    ws.column_dimensions["H"].width = 18
+    ws.column_dimensions["I"].width = 14
+    ws.column_dimensions["J"].width = 18
     ws.column_dimensions["K"].width = 20
+    ws.column_dimensions["L"].width = 20
 
     # 冻结
     ws.freeze_panes = "A3"
+
+    # ========== H股分红公告 Sheet ==========
+    if hk_records:
+        ws_hk = wb.create_sheet("H股分红公告")
+
+        # 标题行
+        ws_hk.merge_cells("A1:H1")
+        title_hk = ws_hk["A1"]
+        title_hk.value = f"H股分红公告"
+        title_hk.font = Font(name="微软雅黑", size=14, bold=True, color="8E44AD")
+        title_hk.alignment = Alignment(horizontal="center", vertical="center")
+        ws_hk.row_dimensions[1].height = 36
+
+        # 表头
+        hk_headers = ["股票代码", "股票名称", "公告日", "财政年度", "分配类型", "分红方案", "除净日", "发放日"]
+        for col_idx, header in enumerate(hk_headers, 1):
+            cell = ws_hk.cell(row=2, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+        ws_hk.row_dimensions[2].height = 28
+
+        current_row = 3
+        for code, name, recs in hk_records:
+            if not recs:
+                continue
+
+            # 分组标题
+            ws_hk.merge_cells(f"A{current_row}:H{current_row}")
+            group_cell = ws_hk.cell(row=current_row, column=1, value=f"{code}  {name}  ({len(recs)}条)")
+            group_cell.font = group_font
+            group_cell.fill = group_fill
+            for c in range(1, 9):
+                ws_hk.cell(row=current_row, column=c).border = thin_border
+            ws_hk.row_dimensions[current_row].height = 26
+            current_row += 1
+
+            for rec in recs:
+                ws_hk.cell(row=current_row, column=1, value=code).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=1).border = thin_border
+                ws_hk.cell(row=current_row, column=2, value=name).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=2).border = thin_border
+                ws_hk.cell(row=current_row, column=3, value=rec.get("AnnouncementDate", "")).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=3).border = thin_border
+                ws_hk.cell(row=current_row, column=4, value=rec.get("FiscalYear", "")).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=4).border = thin_border
+                ws_hk.cell(row=current_row, column=5, value=rec.get("DistributionType", "")).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=5).border = thin_border
+                ws_hk.cell(row=current_row, column=6, value=rec.get("Scheme", "")).alignment = WrapTextAlignment(wrap_text=True, vertical="center")
+                ws_hk.cell(row=current_row, column=6).border = thin_border
+                ws_hk.cell(row=current_row, column=7, value=rec.get("ExDividendDate", "")).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=7).border = thin_border
+                ws_hk.cell(row=current_row, column=8, value=rec.get("PaymentDate", "")).alignment = cell_alignment
+                ws_hk.cell(row=current_row, column=8).border = thin_border
+                ws_hk.row_dimensions[current_row].height = 30
+                current_row += 1
+
+        # H股sheet列宽
+        ws_hk.column_dimensions["A"].width = 12
+        ws_hk.column_dimensions["B"].width = 22
+        ws_hk.column_dimensions["C"].width = 14
+        ws_hk.column_dimensions["D"].width = 10
+        ws_hk.column_dimensions["E"].width = 12
+        ws_hk.column_dimensions["F"].width = 45
+        ws_hk.column_dimensions["G"].width = 14
+        ws_hk.column_dimensions["H"].width = 14
+        ws_hk.freeze_panes = "A3"
 
     # 保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

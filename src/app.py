@@ -6,11 +6,16 @@ Web界面 - Flask后端服务
 """
 
 import os
+import sys
 import re
 import uuid
 import time
 import logging
 import threading
+
+# 确保 src/ 目录在 sys.path 中，支持从项目根目录启动
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from datetime import datetime
 from functools import wraps
 from typing import Dict, List, Optional, Tuple
@@ -22,7 +27,7 @@ from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel, write_industry_avg_excel, write_merged_by_report_type
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
-from szse_scraper import fetch_year_data, write_szse_excel
+from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
 
 # 日志配置
@@ -34,7 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 初始化Flask
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder="../web/templates", static_folder="../web/static")
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'annual-report-fetcher-secret')
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 最大1MB文件
 
@@ -100,23 +105,32 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             all_company_data = {}
             company_industries = {}
 
-            for idx, (code, name) in enumerate(resolved):
+            for idx, (code, name, org_id) in enumerate(resolved):
+                is_non_listed = bool(org_id and not code)
+                if is_non_listed:
+                    company_display = f"{name}(非上市:{org_id})"
+                    ind_key = org_id or name
+                else:
+                    company_display = f"{name}({code})"
+                    ind_key = code
                 current = idx + 1
-                company_display = f"{name}({code})"
                 task['progress']['current'] = current
                 task['progress']['message'] = f"正在获取: {company_display}"
 
                 logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
 
-                data = fetcher.fetch_company_data(code, start_year, end_year)
+                data = fetcher.fetch_company_data(code, start_year, end_year, org_id=org_id)
                 all_company_data[company_display] = data
 
                 # 获取行业信息
-                ind = get_company_industry(code)
-                if ind and ind[1]:
-                    company_industries[code] = ind[1]
+                if code:
+                    ind = get_company_industry(code)
+                    if ind and ind[1]:
+                        company_industries[ind_key] = ind[1]
+                    else:
+                        company_industries[ind_key] = "其他"
                 else:
-                    company_industries[code] = "其他"
+                    company_industries[ind_key] = "其他"
 
                 time.sleep(0.5)
 
@@ -138,15 +152,19 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
 
         else:
             # ========== 分企业模式：每个企业单独Excel ==========
-            for idx, (code, name) in enumerate(resolved):
+            for idx, (code, name, org_id) in enumerate(resolved):
+                is_non_listed = bool(org_id and not code)
+                if is_non_listed:
+                    company_display = f"{name}(非上市:{org_id})"
+                else:
+                    company_display = f"{name}({code})"
                 current = idx + 1
-                company_display = f"{name}({code})"
                 task['progress']['current'] = current
                 task['progress']['message'] = f"正在获取: {company_display}"
 
                 logger.info(f"任务 {task_id}: [{current}/{total}] {company_display}")
 
-                data = fetcher.fetch_company_data(code, start_year, end_year)
+                data = fetcher.fetch_company_data(code, start_year, end_year, org_id=org_id)
 
                 # 写入Excel（企业自身数据，不含行业均值）
                 filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
@@ -169,7 +187,10 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             # 收集各企业的行业信息，按行业去重
             industry_map: Dict[str, Tuple[str, str, List[str]]] = {}  # ind_name -> (ind_code, ind_name, [codes])
 
-            for code, name in resolved:
+            for code, name, org_id in resolved:
+                # 非上市公司跳过行业均值
+                if not code:
+                    continue
                 ind = get_company_industry(code)
                 if ind and ind[1]:
                     ind_code, ind_name = ind
@@ -265,16 +286,21 @@ def fetch_data():
     if start_year > end_year:
         start_year, end_year = end_year, start_year
 
-    # 解析企业列表
+    # 解析企业列表：文件上传优先，文本输入作为后备
     companies = []
-    if text_input:
-        companies = parse_companies_from_text(text_input)
-    # 如果有文件上传，覆盖文本输入
     if 'file' in request.files:
         file = request.files['file']
-        if file and file.filename and allowed_file(file.filename):
-            content = file.read().decode('utf-8')
-            companies = parse_companies_from_text(content)
+        if file and file.filename:
+            try:
+                content = file.read().decode('utf-8')
+                file_companies = parse_companies_from_text(content)
+                if file_companies:
+                    companies = file_companies
+            except Exception as e:
+                logger.warning(f"读取上传文件失败: {e}")
+    # 如果没有从文件获得到企业，则使用文本输入
+    if not companies and text_input:
+        companies = parse_companies_from_text(text_input)
 
     if not companies:
         return jsonify({'success': False, 'error': '请输入至少一个企业'}), 400
@@ -456,6 +482,18 @@ def process_szse_task(task_id: str, year: int):
                 'size': file_size,
                 'display_name': f"深交所日度概况_{year}年.xlsx",
             })
+
+            # 生成周度总结TXT
+            txt_path = write_szse_weekly_summary(year, data, output_dir=config.output_dir)
+            if txt_path:
+                txt_size = os.path.getsize(txt_path) if os.path.exists(txt_path) else 0
+                task['files'].append({
+                    'name': os.path.basename(txt_path),
+                    'path': txt_path,
+                    'size': txt_size,
+                    'display_name': f"深交所周度总结_{year}年.txt",
+                })
+
             task['progress']['message'] = f"完成! {year}年共 {len(data)} 个交易日"
         else:
             raise ValueError(f"{year}年未获取到任何深交所日度概况数据")
@@ -519,7 +557,16 @@ def process_dividend_task(task_id: str, start_year: int, end_year: int, raw_comp
         if not resolved:
             raise ValueError("未能解析任何企业，请检查企业名单")
 
-        stock_codes = [code for code, _ in resolved]
+        # 过滤：分红数据仅适用于上市公司
+        stock_codes = []
+        for code, name, org_id in resolved:
+            if code:
+                stock_codes.append(code)
+            else:
+                logger.warning(f"分红任务跳过非上市公司: {name}")
+
+        if not stock_codes:
+            raise ValueError("名单中没有上市公司，分红公告仅支持上市公司")
         task['progress']['total'] = len(stock_codes)
         task['progress']['message'] = f"共解析 {len(stock_codes)} 家企业，开始获取分红数据..."
 
@@ -528,12 +575,14 @@ def process_dividend_task(task_id: str, start_year: int, end_year: int, raw_comp
             task['progress']['total'] = total
             task['progress']['message'] = message
 
-        records, not_found = fetch_dividend_data(
+        records, hk_records, not_found = fetch_dividend_data(
             stock_codes, start_year, end_year, progress_callback=progress_callback
         )
 
         if records:
-            filepath = write_dividend_excel(records, start_year, end_year, output_dir=config.output_dir)
+            filepath = write_dividend_excel(records, start_year, end_year,
+                                            output_dir=config.output_dir,
+                                            hk_records=hk_records)
             file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
             task['files'].append({
                 'name': os.path.basename(filepath),
