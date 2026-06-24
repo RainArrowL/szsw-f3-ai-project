@@ -361,13 +361,14 @@ def download_file(filename):
     """下载生成的Excel文件"""
     # 安全检查：防止路径遍历
     filename = os.path.basename(filename)
-    full_path = os.path.join(config.output_dir, filename)
+    output_dir = os.path.abspath(config.output_dir)
+    full_path = os.path.join(output_dir, filename)
 
     if not os.path.exists(full_path):
         abort(404)
 
     return send_from_directory(
-        config.output_dir,
+        output_dir,
         filename,
         as_attachment=True,
         download_name=filename
