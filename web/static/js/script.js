@@ -1,7 +1,10 @@
 /**
- * 年报财务数据获取工具 - 双模块前端交互逻辑
+ * 年报财务数据获取工具 - 前端交互逻辑
  * 模块1: 年报数据爬取 (含行业均值)
- * 模块2: 公募基金管理人名录
+ * 模块2: 金融机构名录
+ * 模块3: 深交所日度概况
+ * 模块4: 分红公告查询
+ * 模块5: 监管处罚信息
  */
 
 // ==================== 常量 ====================
@@ -354,23 +357,100 @@ document.getElementById('annualResetBtn').addEventListener('click', () => {
     endYearEl.value = 2025;
 });
 
-// ==================== 模块2: 公募基金管理人名录 ====================
+// ==================== 模块2: 金融机构名录 ====================
 
-const amacModule = createTaskModule({
-    formId: 'amacForm',
-    submitBtnId: 'amacSubmitBtn',
-    apiUrl: '/api/amac',
-    buildFormData: () => new FormData(),
-    resultId: 'amacResult',
-    progressId: 'amacProgress',
-    progressLabelId: 'amacProgressLabel',
-    progressPercentId: 'amacProgressPercent',
-    progressFillId: 'amacProgressFill',
-    progressMessageId: 'amacProgressMessage',
-    resultSectionId: 'amacResultSection',
-    resultStatusId: 'amacResultStatus',
-    fileListId: 'amacFileList',
+const instCheckboxes = document.querySelectorAll('.inst-checkbox');
+const institutionSubmitBtn = document.getElementById('institutionSubmitBtn');
+
+function updateInstitutionSubmitBtn() {
+    const anyChecked = Array.from(instCheckboxes).some(cb => cb.checked);
+    institutionSubmitBtn.disabled = !anyChecked;
+    if (!anyChecked) {
+        institutionSubmitBtn.style.opacity = '0.5';
+        institutionSubmitBtn.style.cursor = 'not-allowed';
+    } else {
+        institutionSubmitBtn.style.opacity = '1';
+        institutionSubmitBtn.style.cursor = 'pointer';
+    }
+}
+
+instCheckboxes.forEach(cb => {
+    cb.addEventListener('change', updateInstitutionSubmitBtn);
 });
+
+const institutionModule = createTaskModule({
+    formId: 'institutionForm',
+    submitBtnId: 'institutionSubmitBtn',
+    apiUrl: '/api/institutions',
+    buildFormData: () => {
+        const types = [];
+        if (document.getElementById('instAmac').checked) types.push('amac');
+        if (document.getElementById('instBankIns').checked) types.push('bank_insurance');
+        if (document.getElementById('instSecFund').checked) types.push('securities_fund');
+
+        if (types.length === 0) {
+            alert('请至少勾选一种名录');
+            return null;
+        }
+        return new FormData();  // 通过JSON body传参
+    },
+    resultId: 'institutionResult',
+    progressId: 'institutionProgress',
+    progressLabelId: 'institutionProgressLabel',
+    progressPercentId: 'institutionProgressPercent',
+    progressFillId: 'institutionProgressFill',
+    progressMessageId: 'institutionProgressMessage',
+    resultSectionId: 'institutionResultSection',
+    resultStatusId: 'institutionResultStatus',
+    fileListId: 'institutionFileList',
+    // 覆盖默认提交逻辑，使用JSON body
+    onBeforeSubmit: null,
+});
+
+// 覆盖名录表单的提交逻辑（使用JSON body而非FormData）
+(function() {
+    const form = document.getElementById('institutionForm');
+    const origHandler = form.onsubmit;
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const types = [];
+        if (document.getElementById('instAmac').checked) types.push('amac');
+        if (document.getElementById('instBankIns').checked) types.push('bank_insurance');
+        if (document.getElementById('instSecFund').checked) types.push('securities_fund');
+
+        if (types.length === 0) {
+            alert('请至少勾选一种名录');
+            return;
+        }
+
+        institutionModule.setDisabled(true);
+        institutionModule.showResult();
+
+        try {
+            const resp = await fetch('/api/institutions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ types: types }),
+            });
+            const data = await resp.json();
+
+            if (!data.success) {
+                institutionModule.showError(data.error || '请求失败');
+                institutionModule.setDisabled(false);
+                return;
+            }
+
+            institutionModule.pollProgress(data.task_id);
+        } catch (err) {
+            institutionModule.showError('网络错误: ' + err.message);
+            institutionModule.setDisabled(false);
+        }
+    });
+})();
+
+// 初始化按钮状态
+updateInstitutionSubmitBtn();
 
 // ==================== 模块3: 深交所日度概况 ====================
 
@@ -540,6 +620,54 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+
+// ==================== 模块5: 监管处罚信息 ====================
+
+const penaltyModule = createTaskModule({
+    formId: 'penaltyForm',
+    submitBtnId: 'penaltySubmitBtn',
+    apiUrl: '/api/penalty',
+    buildFormData: () => new FormData(),
+    resultId: 'penaltyResult',
+    progressId: 'penaltyProgress',
+    progressLabelId: 'penaltyProgressLabel',
+    progressPercentId: 'penaltyProgressPercent',
+    progressFillId: 'penaltyProgressFill',
+    progressMessageId: 'penaltyProgressMessage',
+    resultSectionId: 'penaltyResultSection',
+    resultStatusId: 'penaltyResultStatus',
+    fileListId: 'penaltyFileList',
+});
+
+// 覆盖处罚表单提交逻辑（使用JSON body）
+(function() {
+    const form = document.getElementById('penaltyForm');
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        penaltyModule.setDisabled(true);
+        penaltyModule.showResult();
+
+        try {
+            const resp = await fetch('/api/penalty', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            const data = await resp.json();
+
+            if (!data.success) {
+                penaltyModule.showError(data.error || '请求失败');
+                penaltyModule.setDisabled(false);
+                return;
+            }
+
+            penaltyModule.pollProgress(data.task_id);
+        } catch (err) {
+            penaltyModule.showError('网络错误: ' + err.message);
+            penaltyModule.setDisabled(false);
+        }
+    });
+})();
 
 // ==================== 启动 ====================
 initYearSelectors();

@@ -28,6 +28,8 @@ from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel, write_industry_avg_excel, write_merged_by_report_type
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
+from penalty_scraper import fetch_all_penalties, write_penalty_excel
+from institution_scraper import fetch_all_institution_lists, write_institution_excel
 from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
 
@@ -385,55 +387,115 @@ def get_status():
     })
 
 
-# ==================== AMAC 名录独立端点 ====================
+# ==================== 金融机构法人名录端点 ====================
 
-def process_amac_task(task_id: str):
+def process_institution_task(task_id: str, types: List[str]):
     """
-    后台线程执行公募基金管理人名录爬取任务
+    后台线程执行金融机构法人名录爬取任务
+    types: 勾选的类型列表，如 ['amac', 'bank_insurance', 'securities_fund']
     """
     task = tasks[task_id]
     task['status'] = 'processing'
+    task['progress']['total'] = len(types)
 
     try:
-        task['progress']['message'] = "正在爬取公募基金管理人名录..."
-        logger.info(f"AMAC任务 {task_id}: 开始爬取")
+        # 1. 公募基金管理人名录
+        if 'amac' in types:
+            task['progress']['message'] = "正在爬取公募基金管理人名录..."
+            logger.info(f"机构名录任务 {task_id}: 开始爬取公募基金名录")
+            amac_records = fetch_fund_manager_list()
+            if amac_records:
+                amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
+                file_size = Path(amac_filepath).stat().st_size if Path(amac_filepath).exists() else 0
+                task['files'].append({
+                    'name': Path(amac_filepath).name,
+                    'path': amac_filepath,
+                    'size': file_size,
+                    'display_name': "公募基金管理人名录.xlsx",
+                })
+            task['progress']['current'] += 1
 
-        amac_records = fetch_fund_manager_list()
-        if amac_records:
-            amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
-            file_size = Path(amac_filepath).stat().st_size if Path(amac_filepath).exists() else 0
-            task['files'].append({
-                'name': Path(amac_filepath).name,
-                'path': amac_filepath,
-                'size': file_size,
-                'display_name': "公募基金管理人名录.xlsx",
-            })
-            task['progress']['total'] = 1
-            task['progress']['current'] = 1
-        else:
-            raise ValueError("公募基金管理人名录爬取失败，未获取到数据")
+        # 2. 银行保险法人名单
+        if 'bank_insurance' in types:
+            task['progress']['message'] = "正在爬取银行保险法人名单..."
+            logger.info(f"机构名录任务 {task_id}: 开始爬取银行保险法人名单")
+            bank_ins_data = fetch_all_institution_lists()
+            if bank_ins_data:
+                # 只取银行和保险数据
+                bi_data = {
+                    "bank": bank_ins_data.get("bank", []),
+                    "insurance": bank_ins_data.get("insurance", []),
+                }
+                bi_filepath = write_institution_excel(bi_data, output_dir=config.output_dir)
+                file_size = Path(bi_filepath).stat().st_size if Path(bi_filepath).exists() else 0
+                task['files'].append({
+                    'name': Path(bi_filepath).name,
+                    'path': bi_filepath,
+                    'size': file_size,
+                    'display_name': "银行保险法人名单.xlsx",
+                })
+            task['progress']['current'] += 1
+
+        # 3. 证券基金公司名单
+        if 'securities_fund' in types:
+            task['progress']['message'] = "正在爬取证券基金公司名单..."
+            logger.info(f"机构名录任务 {task_id}: 开始爬取证券基金公司名单")
+            sec_fund_data = fetch_all_institution_lists()
+            if sec_fund_data:
+                sf_data = {
+                    "securities": sec_fund_data.get("securities", []),
+                    "funds": sec_fund_data.get("funds", []),
+                }
+                sf_filepath = write_institution_excel(sf_data, output_dir=config.output_dir)
+                file_size = Path(sf_filepath).stat().st_size if Path(sf_filepath).exists() else 0
+                task['files'].append({
+                    'name': Path(sf_filepath).name,
+                    'path': sf_filepath,
+                    'size': file_size,
+                    'display_name': "证券基金公司名单.xlsx",
+                })
+            task['progress']['current'] += 1
+
+        if not task['files']:
+            raise ValueError("所有名录获取均失败，未获取到数据")
 
         task['status'] = 'done'
         task['progress']['message'] = "完成! 名录已生成"
-        logger.info(f"AMAC任务 {task_id} 完成")
+        logger.info(f"机构名录任务 {task_id} 完成")
 
     except Exception as e:
         task['status'] = 'error'
         task['error'] = str(e)
-        logger.error(f"AMAC任务 {task_id} 失败: {e}", exc_info=True)
+        logger.error(f"机构名录任务 {task_id} 失败: {e}", exc_info=True)
 
 
-@app.route('/api/amac', methods=['POST'])
-def fetch_amac():
-    """提交公募基金管理人名录爬取任务"""
-    # 创建任务
+@app.route('/api/institutions', methods=['POST'])
+def fetch_institutions():
+    """提交金融机构法人名录爬取任务"""
+    data = request.get_json() or {}
+    types = data.get('types', [])
+
+    if not types:
+        return jsonify({
+            'success': False,
+            'error': '请至少选择一种名录类型'
+        }), 400
+
+    valid_types = {'amac', 'bank_insurance', 'securities_fund'}
+    types = [t for t in types if t in valid_types]
+    if not types:
+        return jsonify({
+            'success': False,
+            'error': '无效的名录类型'
+        }), 400
+
     task_id = str(uuid.uuid4())[:8]
     tasks[task_id] = {
         'id': task_id,
         'status': 'pending',
         'progress': {
             'current': 0,
-            'total': 1,
+            'total': len(types),
             'message': '等待开始...',
         },
         'files': [],
@@ -441,9 +503,80 @@ def fetch_amac():
         'created_at': time.time(),
     }
 
-    # 启动后台线程
     thread = threading.Thread(
-        target=process_amac_task,
+        target=process_institution_task,
+        args=(task_id, types),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'task_id': task_id,
+    })
+
+
+# ==================== 处罚信息端点 ====================
+
+def process_penalty_task(task_id: str):
+    """
+    后台线程执行处罚信息爬取任务
+    """
+    task = tasks[task_id]
+    task['status'] = 'processing'
+    task['progress']['total'] = 2
+
+    try:
+        task['progress']['message'] = "正在爬取国家金融监督管理总局处罚信息..."
+        logger.info(f"处罚任务 {task_id}: 开始爬取")
+
+        nfra_records, csrc_records = fetch_all_penalties()
+
+        task['progress']['current'] = 1
+        task['progress']['message'] = "正在爬取证监会处罚信息..."
+
+        if nfra_records or csrc_records:
+            filepath = write_penalty_excel(nfra_records, csrc_records, output_dir=config.output_dir)
+            file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
+            task['files'].append({
+                'name': Path(filepath).name,
+                'path': filepath,
+                'size': file_size,
+                'display_name': "金融机构处罚信息.xlsx",
+            })
+            task['progress']['current'] = 2
+        else:
+            raise ValueError("处罚信息获取失败，未获取到数据")
+
+        task['status'] = 'done'
+        task['progress']['message'] = f"完成! 金监总局{len(nfra_records)}条 + 证监会{len(csrc_records)}条"
+        logger.info(f"处罚任务 {task_id} 完成")
+
+    except Exception as e:
+        task['status'] = 'error'
+        task['error'] = str(e)
+        logger.error(f"处罚任务 {task_id} 失败: {e}", exc_info=True)
+
+
+@app.route('/api/penalty', methods=['POST'])
+def fetch_penalty():
+    """提交处罚信息爬取任务"""
+    task_id = str(uuid.uuid4())[:8]
+    tasks[task_id] = {
+        'id': task_id,
+        'status': 'pending',
+        'progress': {
+            'current': 0,
+            'total': 2,
+            'message': '等待开始...',
+        },
+        'files': [],
+        'error': None,
+        'created_at': time.time(),
+    }
+
+    thread = threading.Thread(
+        target=process_penalty_task,
         args=(task_id,),
         daemon=True
     )
