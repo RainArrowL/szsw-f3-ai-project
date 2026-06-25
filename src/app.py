@@ -12,9 +12,10 @@ import uuid
 import time
 import logging
 import threading
+from pathlib import Path
 
 # 确保 src/ 目录在 sys.path 中，支持从项目根目录启动
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from datetime import datetime
 from functools import wraps
@@ -141,8 +142,8 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             )
 
             for filepath in merged_files:
-                name = os.path.basename(filepath)
-                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                name = Path(filepath).name
+                file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
                 task['files'].append({
                     'name': name,
                     'path': filepath,
@@ -169,9 +170,9 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
                 # 写入Excel（企业自身数据，不含行业均值）
                 filepath = write_company_excel(company_display, data, output_dir=config.output_dir)
 
-                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
                 task['files'].append({
-                    'name': os.path.basename(filepath),
+                    'name': Path(filepath).name,
                     'path': filepath,
                     'size': file_size,
                     'display_name': f"{company_display}_年报财务数据.xlsx",
@@ -222,9 +223,9 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
                     ia_filepath = write_industry_avg_excel(
                         ind_name, industry_avg, output_dir=config.output_dir
                     )
-                    file_size = os.path.getsize(ia_filepath) if os.path.exists(ia_filepath) else 0
+                    file_size = Path(ia_filepath).stat().st_size if Path(ia_filepath).exists() else 0
                     task['files'].append({
-                        'name': os.path.basename(ia_filepath),
+                        'name': Path(ia_filepath).name,
                         'path': ia_filepath,
                         'size': file_size,
                         'display_name': f"行业均值_{safe_ind}_年报财务数据.xlsx",
@@ -238,9 +239,9 @@ def process_task(task_id: str, start_year: int, end_year: int, raw_companies: Li
             amac_records = fetch_fund_manager_list()
             if amac_records:
                 amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
-                file_size = os.path.getsize(amac_filepath) if os.path.exists(amac_filepath) else 0
+                file_size = Path(amac_filepath).stat().st_size if Path(amac_filepath).exists() else 0
                 task['files'].append({
-                    'name': os.path.basename(amac_filepath),
+                    'name': Path(amac_filepath).name,
                     'path': amac_filepath,
                     'size': file_size,
                     'display_name': f"公募基金管理人名录.xlsx",
@@ -360,15 +361,15 @@ def get_progress(task_id):
 def download_file(filename):
     """下载生成的Excel文件"""
     # 安全检查：防止路径遍历
-    filename = os.path.basename(filename)
-    output_dir = os.path.abspath(config.output_dir)
-    full_path = os.path.join(output_dir, filename)
+    filename = Path(filename).name
+    output_dir = config.output_dir.resolve()
+    full_path = output_dir / filename
 
-    if not os.path.exists(full_path):
+    if not full_path.exists():
         abort(404)
 
     return send_from_directory(
-        output_dir,
+        str(output_dir),
         filename,
         as_attachment=True,
         download_name=filename
@@ -400,9 +401,9 @@ def process_amac_task(task_id: str):
         amac_records = fetch_fund_manager_list()
         if amac_records:
             amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
-            file_size = os.path.getsize(amac_filepath) if os.path.exists(amac_filepath) else 0
+            file_size = Path(amac_filepath).stat().st_size if Path(amac_filepath).exists() else 0
             task['files'].append({
-                'name': os.path.basename(amac_filepath),
+                'name': Path(amac_filepath).name,
                 'path': amac_filepath,
                 'size': file_size,
                 'display_name': "公募基金管理人名录.xlsx",
@@ -476,9 +477,9 @@ def process_szse_task(task_id: str, year: int):
 
         if data:
             filepath = write_szse_excel(year, data, output_dir=config.output_dir)
-            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+            file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
             task['files'].append({
-                'name': os.path.basename(filepath),
+                'name': Path(filepath).name,
                 'path': filepath,
                 'size': file_size,
                 'display_name': f"深交所日度概况_{year}年.xlsx",
@@ -487,9 +488,9 @@ def process_szse_task(task_id: str, year: int):
             # 生成周度总结TXT
             txt_path = write_szse_weekly_summary(year, data, output_dir=config.output_dir)
             if txt_path:
-                txt_size = os.path.getsize(txt_path) if os.path.exists(txt_path) else 0
+                txt_size = Path(txt_path).stat().st_size if Path(txt_path).exists() else 0
                 task['files'].append({
-                    'name': os.path.basename(txt_path),
+                    'name': Path(txt_path).name,
                     'path': txt_path,
                     'size': txt_size,
                     'display_name': f"深交所周度总结_{year}年.txt",
@@ -584,9 +585,9 @@ def process_dividend_task(task_id: str, start_year: int, end_year: int, raw_comp
             filepath = write_dividend_excel(records, start_year, end_year,
                                             output_dir=config.output_dir,
                                             hk_records=hk_records)
-            file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+            file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
             task['files'].append({
-                'name': os.path.basename(filepath),
+                'name': Path(filepath).name,
                 'path': filepath,
                 'size': file_size,
                 'display_name': f"分红公告_{start_year}-{end_year}年.xlsx",
@@ -668,7 +669,7 @@ def fetch_dividend():
 
 if __name__ == '__main__':
     # 创建输出目录
-    os.makedirs(config.output_dir, exist_ok=True)
+    config.output_dir.mkdir(parents=True, exist_ok=True)
 
     # 检查依赖
     print("=" * 60)

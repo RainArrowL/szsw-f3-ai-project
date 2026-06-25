@@ -16,6 +16,7 @@
 
 import sys
 import logging
+from pathlib import Path
 from datetime import datetime
 
 from config import config
@@ -355,7 +356,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
         if args.output:
-            config.output_dir = args.output
+            config.output_dir = Path(args.output)
 
         if args.companies and args.start and args.end:
             run_quick_mode(args.companies, args.start, args.end)

@@ -8,6 +8,7 @@
 
 import time
 import logging
+from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Callable, Tuple
 
@@ -578,9 +579,8 @@ def write_dividend_excel(
     - 股票代码、股票名称、公告日、股权登记日、现金红利发放日、每股分红(元)、分配金额(元)
     - 按股票代码分组，每组内按公告日排序
     """
-    import os
 
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -756,7 +756,7 @@ def write_dividend_excel(
                 ws_hk.cell(row=current_row, column=4).border = thin_border
                 ws_hk.cell(row=current_row, column=5, value=rec.get("DistributionType", "")).alignment = cell_alignment
                 ws_hk.cell(row=current_row, column=5).border = thin_border
-                ws_hk.cell(row=current_row, column=6, value=rec.get("Scheme", "")).alignment = WrapTextAlignment(wrap_text=True, vertical="center")
+                ws_hk.cell(row=current_row, column=6, value=rec.get("Scheme", "")).alignment = Alignment(wrap_text=True, vertical="center")
                 ws_hk.cell(row=current_row, column=6).border = thin_border
                 ws_hk.cell(row=current_row, column=7, value=rec.get("ExDividendDate", "")).alignment = cell_alignment
                 ws_hk.cell(row=current_row, column=7).border = thin_border
@@ -779,7 +779,7 @@ def write_dividend_excel(
     # 保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"分红公告_{start_year}-{end_year}年_{timestamp}.xlsx"
-    filepath = os.path.join(output_dir, filename)
+    filepath = str(Path(output_dir) / filename)
     wb.save(filepath)
     logger.info(f"分红Excel已保存: {filepath} (共{len(records)}条记录)")
 

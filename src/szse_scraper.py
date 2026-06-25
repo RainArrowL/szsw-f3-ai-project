@@ -8,6 +8,7 @@
 
 import time
 import logging
+from pathlib import Path
 from datetime import date, timedelta, datetime
 from typing import List, Tuple, Optional, Callable
 from collections import OrderedDict
@@ -118,10 +119,9 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     - 列：成交量（亿股）、成交金额（亿元）、日均成交金额、成交额×0.05%
     - 日均成交金额仅在每周小计行显示，计算公式：当周成交金额小计 ÷ 当周实际交易日天数
     """
-    import os
     from datetime import date as date_type
 
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -270,7 +270,7 @@ def write_szse_excel(year: int, data: List[Tuple[str, float, float]], output_dir
     # 保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"深交所日度概况_{year}年_{timestamp}.xlsx"
-    filepath = os.path.join(output_dir, filename)
+    filepath = str(Path(output_dir) / filename)
     wb.save(filepath)
     logger.info(f"Excel已保存: {filepath} (共{len(data)}个交易日, {len(weeks)}周)")
 
@@ -293,10 +293,9 @@ def write_szse_weekly_summary(year: int, data: List[Tuple[str, float, float]], o
     返回:
         生成的TXT文件路径
     """
-    import os
     from datetime import date as date_type
 
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # 按ISO周分组
     weeks = {}
@@ -354,7 +353,7 @@ def write_szse_weekly_summary(year: int, data: List[Tuple[str, float, float]], o
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"深交所周度总结_{year}年_{timestamp}.txt"
-    filepath = os.path.join(output_dir, filename)
+    filepath = str(Path(output_dir) / filename)
 
     content = "\n".join(lines)
     with open(filepath, "w", encoding="utf-8") as f:

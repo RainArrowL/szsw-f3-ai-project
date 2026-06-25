@@ -7,8 +7,8 @@ Excel写入模块
 - 列名均为中文
 """
 
-import os
 import logging
+from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Any
 from openpyxl import Workbook
@@ -181,11 +181,11 @@ def write_company_excel(
     if output_dir is None:
         output_dir = config.output_dir
 
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # 清理文件名中的非法字符
     safe_name = company_name.replace("/", "_").replace("\\", "_").replace(":", "_")
-    filepath = os.path.join(output_dir, f"{safe_name}_年报财务数据.xlsx")
+    filepath = str(Path(output_dir) / f"{safe_name}_年报财务数据.xlsx")
 
     wb = Workbook()
     # 删除默认sheet
@@ -285,7 +285,7 @@ def write_merged_by_report_type(
     """
     if output_dir is None:
         output_dir = config.output_dir
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     files = []
 
@@ -418,7 +418,7 @@ def _write_single_merged_excel(
     # 安全文件名
     safe_name = report_name.replace("/", "_").replace("\\", "_").replace(":", "_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(output_dir, f"{safe_name}_合并_{timestamp}.xlsx")
+    filepath = str(Path(output_dir) / f"{safe_name}_合并_{timestamp}.xlsx")
     wb.save(filepath)
     files.append(filepath)
     logger.info(f"合并Excel已保存: {filepath} ({len(rows)}行, {len(all_fields)}字段)")
@@ -475,7 +475,7 @@ def _write_merged_notes_excel(
     _format_sheet(ws, headers, len(headers), len(all_rows))
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(output_dir, f"附注_合并_{timestamp}.xlsx")
+    filepath = str(Path(output_dir) / f"附注_合并_{timestamp}.xlsx")
     wb.save(filepath)
     files.append(filepath)
     logger.info(f"合并附注Excel已保存: {filepath} ({len(all_rows)}行, {len(all_fields)}字段)")
@@ -500,10 +500,10 @@ def write_industry_avg_excel(
     if output_dir is None:
         output_dir = config.output_dir
 
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     safe_name = industry_name.replace("/", "_").replace("\\", "_").replace(":", "_")
-    filepath = os.path.join(output_dir, f"行业均值_{safe_name}_年报财务数据.xlsx")
+    filepath = str(Path(output_dir) / f"行业均值_{safe_name}_年报财务数据.xlsx")
 
     wb = Workbook()
     wb.remove(wb.active)
@@ -571,7 +571,7 @@ def write_all_companies(
     if output_dir is None:
         output_dir = config.output_dir
 
-    os.makedirs(output_dir, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
     files = []
 
     total = len(all_data)

@@ -7,6 +7,7 @@ API: https://www.amac.org.cn/portal/front/mutualFund/findMutualFundHousePage
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
@@ -97,13 +98,12 @@ def write_amac_excel(records: List[Dict[str, str]], output_dir: str) -> str:
     返回：
         文件路径
     """
-    import os
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    os.makedirs(output_dir, exist_ok=True)
-    filepath = os.path.join(output_dir, "公募基金管理人名录.xlsx")
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    filepath = str(Path(output_dir) / "公募基金管理人名录.xlsx")
 
     wb = Workbook()
     ws = wb.active

@@ -6,6 +6,7 @@
 """
 
 import os
+from pathlib import Path
 from dataclasses import dataclass
 
 # ==================== 深证信API凭证配置 ====================
@@ -48,7 +49,7 @@ class Config:
     access_key: str = ACCESS_KEY
     access_secret: str = ACCESS_SECRET
     base_url: str = BASE_URL
-    output_dir: str = OUTPUT_DIR
+    output_dir: Path = Path(OUTPUT_DIR)
     timeout: int = TIMEOUT
     request_interval: float = REQUEST_INTERVAL
     max_rows_per_page: int = MAX_ROWS_PER_PAGE
@@ -57,7 +58,8 @@ class Config:
         # 从环境变量读取（如果存在）
         self.access_key = os.environ.get("CNINFO_ACCESS_KEY", self.access_key)
         self.access_secret = os.environ.get("CNINFO_ACCESS_SECRET", self.access_secret)
-        self.output_dir = os.environ.get("CNINFO_OUTPUT_DIR", self.output_dir)
+        env_output = os.environ.get("CNINFO_OUTPUT_DIR")
+        self.output_dir = Path(env_output) if env_output else Path(OUTPUT_DIR)
 
     def is_credential_set(self) -> bool:
         """检查凭证是否已设置"""
