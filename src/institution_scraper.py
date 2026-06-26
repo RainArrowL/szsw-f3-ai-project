@@ -35,7 +35,7 @@ NFRA_INSURANCE_PDF_URL = (
     "2a78efc6d162484f8dfb8d0388b00320.pdf"
 )
 
-# ── CSRC 证券基金公司名单 ───────────────────────────────────
+# ── CSRC 证券基金期货公司名录 ───────────────────────────────────
 # 上海辖区证券公司名录（上海局汇总全国证券公司）
 CSRC_SECURITIES_URL = (
     "http://www.csrc.gov.cn/shanghai/c103854/c7637721/content.shtml"
@@ -43,6 +43,10 @@ CSRC_SECURITIES_URL = (
 # 上海辖区基金管理公司名录
 CSRC_FUND_URL = (
     "http://www.csrc.gov.cn/shanghai/c103856/c7639412/content.shtml"
+)
+# 证监会公开的期货公司名录（最新）
+CSRC_FUTURES_URL = (
+    "http://www.csrc.gov.cn/csrc/c101920/c1039268/content.shtml"
 )
 
 
@@ -183,14 +187,18 @@ def _parse_xlsx(data: bytes) -> List[List[str]]:
     return []
 
 
-def _is_header_row(row: List[str], header_keywords: List[str] = None) -> bool:
-    """判断是否为表头行或无效行（需要跳过）"""
+def _is_header_row(row: List[str], header_keywords: List[str] = None,
+                   name_col_index: int = 1) -> bool:
+    """判断是否为表头行或无效行（需要跳过）
+
+    name_col_index: 名称列在行中的索引（默认第1列即索引1）
+    """
     if header_keywords is None:
         header_keywords = ["序号", "中文全称", "机构名称", "公司名称", "单位名称",
                            "名称", "序号", "英文全称"]
     if not row:
         return True
-    name_col = row[1] if len(row) > 1 else row[0] if row else ""
+    name_col = row[name_col_index] if len(row) > name_col_index else row[0] if row else ""
     # 空名称
     if not name_col or not name_col.strip():
         return True
@@ -272,8 +280,8 @@ def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
 
 
 def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
-    """获取证券基金公司名单"""
-    result = {"securities": [], "funds": []}
+    """获取证券基金期货公司名单"""
+    result = {"securities": [], "funds": [], "futures": []}
 
     # 获取证券公司名录
     logger.info("正在获取证券公司名录...")
@@ -330,6 +338,35 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
                             "addr": row[2] if len(row) > 2 else "",
                         })
     logger.info(f"基金公司名录: {len(result['funds'])} 家")
+
+    # 获取期货公司名录
+    logger.info("正在获取期货公司名录...")
+    html = _fetch_html(CSRC_FUTURES_URL)
+    if html:
+        xlsx_url = _find_xlsx_url(html, CSRC_FUTURES_URL)
+        if xlsx_url:
+            data = _download_file(xlsx_url)
+            if data:
+                rows = _parse_xlsx(data)
+                for row in rows:
+                    if _is_header_row(row, ["期货公司名称", "序号", "辖区"], name_col_index=2):
+                        continue
+                    if len(row) >= 2:
+                        # 期货公司表格：序号 | 辖区 | 期货公司名称
+                        name = row[2] if len(row) > 2 else row[1] if len(row) > 1 else ""
+                        result["futures"].append({
+                            "name": name,
+                            "region": row[1] if len(row) > 1 else "",
+                        })
+        if not result["futures"]:
+            tables = _parse_html_table(html)
+            for row in tables[1:]:
+                if not _is_header_row(row, ["期货公司名称", "序号", "辖区"], name_col_index=2):
+                    if len(row) >= 2:
+                        name = row[2] if len(row) > 2 else row[1] if len(row) > 1 else ""
+                        region = row[1] if len(row) > 1 else ""
+                        result["futures"].append({"name": name, "region": region})
+    logger.info(f"期货公司名录: {len(result['futures'])} 家")
     return result
 
 
@@ -343,6 +380,7 @@ def fetch_all_institution_lists() -> Dict[str, List[Dict]]:
         "insurance": bank_insurance["insurance"],
         "securities": sec_fund["securities"],
         "funds": sec_fund["funds"],
+        "futures": sec_fund["futures"],
     }
 
 
@@ -388,11 +426,14 @@ def write_institution_excel(
         ("insurance", "保险法人名单", ["序号", "机构名称", "机构编码", "机构类型"]),
         ("securities", "证券公司名单", ["序号", "公司名称", "地址"]),
         ("funds", "基金公司名单", ["序号", "公司名称", "地址"]),
+        ("futures", "期货公司名单", ["序号", "辖区", "期货公司名称"]),
     ]
 
     first = True
     for key, title, headers in sheet_specs:
         items = data.get(key, [])
+        if not items:
+            continue
         if first:
             ws = wb.active
             first = False
@@ -401,8 +442,12 @@ def write_institution_excel(
 
         rows_data = []
         for i, item in enumerate(items, 1):
-            if key == "securities" or key == "funds":
+            if key == "securities":
                 rows_data.append([i, item.get("name", ""), item.get("addr", "")])
+            elif key == "funds":
+                rows_data.append([i, item.get("name", ""), item.get("addr", "")])
+            elif key == "futures":
+                rows_data.append([i, item.get("region", ""), item.get("name", "")])
             else:
                 rows_data.append([i, item.get("name", ""), item.get("code", ""), item.get("type", "")])
 
@@ -414,8 +459,10 @@ def write_institution_excel(
         if key in ("bank", "insurance"):
             ws.column_dimensions["C"].width = 20
             ws.column_dimensions["D"].width = 18
-        else:
+        elif key in ("securities", "funds"):
             ws.column_dimensions["C"].width = 50
+        elif key == "futures":
+            ws.column_dimensions["C"].width = 40
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{prefix}_{timestamp}.xlsx"

@@ -28,7 +28,7 @@ from cninfo_fin_data import FinancialDataFetcher, resolve_companies
 from excel_writer import write_company_excel, write_industry_avg_excel, write_merged_by_report_type
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
-from penalty_scraper import fetch_all_penalties, write_penalty_excel
+from penalty_scraper import fetch_all_penalty, write_penalty_excel
 from institution_scraper import fetch_all_institution_lists, write_institution_excel
 from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
@@ -543,19 +543,25 @@ def process_penalty_task(task_id: str):
     """
     task = tasks[task_id]
     task['status'] = 'processing'
-    task['progress']['total'] = 2
+    task['progress']['total'] = 3
 
     try:
-        task['progress']['message'] = "正在爬取国家金融监督管理总局处罚信息..."
+        task['progress']['message'] = "正在爬取金监总局处罚信息..."
         logger.info(f"处罚任务 {task_id}: 开始爬取")
 
-        nfra_records, csrc_records = fetch_all_penalties()
+        all_data = fetch_all_penalty(max_per_source=5)
+        nfra_count = len(all_data.get("nfra", []))
+        pbc_count = len(all_data.get("pbc", []))
+        csrc_count = len(all_data.get("csrc", []))
 
         task['progress']['current'] = 1
+        task['progress']['message'] = "正在爬取央行处罚信息..."
+
+        task['progress']['current'] = 2
         task['progress']['message'] = "正在爬取证监会处罚信息..."
 
-        if nfra_records or csrc_records:
-            filepath = write_penalty_excel(nfra_records, csrc_records, output_dir=config.output_dir)
+        if nfra_count or pbc_count or csrc_count:
+            filepath = write_penalty_excel(all_data, output_dir=config.output_dir)
             file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
             task['files'].append({
                 'name': Path(filepath).name,
@@ -563,12 +569,14 @@ def process_penalty_task(task_id: str):
                 'size': file_size,
                 'display_name': "金融机构处罚信息.xlsx",
             })
-            task['progress']['current'] = 2
+            task['progress']['current'] = 3
         else:
             raise ValueError("处罚信息获取失败，未获取到数据")
 
         task['status'] = 'done'
-        task['progress']['message'] = f"完成! 金监总局{len(nfra_records)}条 + 证监会{len(csrc_records)}条"
+        task['progress']['message'] = (
+            f"完成! 金监总局{nfra_count}条 + 央行{pbc_count}条 + 证监会{csrc_count}条"
+        )
         logger.info(f"处罚任务 {task_id} 完成")
 
     except Exception as e:
