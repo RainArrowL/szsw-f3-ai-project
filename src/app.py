@@ -487,48 +487,52 @@ def process_institution_task(task_id: str, types: List[str]):
 @app.route('/api/institutions', methods=['POST'])
 def fetch_institutions():
     """提交金融机构法人名录爬取任务"""
-    data = request.get_json(silent=True) or {}
-    types = data.get('types', [])
+    try:
+        data = request.get_json(silent=True) or {}
+        types = data.get('types', [])
 
-    if not types:
+        if not types:
+            return jsonify({
+                'success': False,
+                'error': '请至少选择一种名录类型'
+            }), 400
+
+        valid_types = {'amac', 'bank_insurance', 'securities_fund'}
+        types = [t for t in types if t in valid_types]
+        if not types:
+            return jsonify({
+                'success': False,
+                'error': '无效的名录类型'
+            }), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        tasks[task_id] = {
+            'id': task_id,
+            'status': 'pending',
+            'progress': {
+                'current': 0,
+                'total': len(types),
+                'message': '等待开始...',
+            },
+            'files': [],
+            'error': None,
+            'created_at': time.time(),
+        }
+
+        thread = threading.Thread(
+            target=process_institution_task,
+            args=(task_id, types),
+            daemon=True
+        )
+        thread.start()
+
         return jsonify({
-            'success': False,
-            'error': '请至少选择一种名录类型'
-        }), 400
-
-    valid_types = {'amac', 'bank_insurance', 'securities_fund'}
-    types = [t for t in types if t in valid_types]
-    if not types:
-        return jsonify({
-            'success': False,
-            'error': '无效的名录类型'
-        }), 400
-
-    task_id = str(uuid.uuid4())[:8]
-    tasks[task_id] = {
-        'id': task_id,
-        'status': 'pending',
-        'progress': {
-            'current': 0,
-            'total': len(types),
-            'message': '等待开始...',
-        },
-        'files': [],
-        'error': None,
-        'created_at': time.time(),
-    }
-
-    thread = threading.Thread(
-        target=process_institution_task,
-        args=(task_id, types),
-        daemon=True
-    )
-    thread.start()
-
-    return jsonify({
-        'success': True,
-        'task_id': task_id,
-    })
+            'success': True,
+            'task_id': task_id,
+        })
+    except Exception as e:
+        logger.error(f"fetch_institutions 异常: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': f'服务器错误: {str(e)}'}), 500
 
 
 # ==================== 处罚信息端点 ====================
