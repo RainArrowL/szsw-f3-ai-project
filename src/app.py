@@ -399,6 +399,49 @@ def process_institution_task(task_id: str, types: List[str]):
     task['progress']['total'] = len(types)
 
     try:
+        # 预取银行保险和证券基金数据（共享一次网络请求）
+        bi_data = None
+        sf_data = None
+
+        if 'bank_insurance' in types:
+            task['progress']['message'] = "正在爬取银行保险法人名单..."
+            logger.info(f"机构名录任务 {task_id}: 开始爬取银行保险法人名单")
+            bi_data = fetch_all_institution_lists()
+            bi_filtered = {
+                "bank": bi_data.get("bank", []),
+                "insurance": bi_data.get("insurance", []),
+            }
+            bi_filepath = write_institution_excel(bi_filtered, output_dir=config.output_dir)
+            file_size = Path(bi_filepath).stat().st_size if Path(bi_filepath).exists() else 0
+            task['files'].append({
+                'name': Path(bi_filepath).name,
+                'path': bi_filepath,
+                'size': file_size,
+                'display_name': "银行保险法人名单.xlsx",
+            })
+            task['progress']['current'] += 1
+
+        if 'securities_fund' in types:
+            task['progress']['message'] = "正在爬取证券基金公司名单..."
+            logger.info(f"机构名录任务 {task_id}: 开始爬取证券基金公司名单")
+            if sf_data is None and bi_data is None:
+                sf_data = fetch_all_institution_lists()
+            else:
+                sf_data = bi_data if bi_data else fetch_all_institution_lists()
+            sf_filtered = {
+                "securities": sf_data.get("securities", []),
+                "funds": sf_data.get("funds", []),
+            }
+            sf_filepath = write_institution_excel(sf_filtered, output_dir=config.output_dir)
+            file_size = Path(sf_filepath).stat().st_size if Path(sf_filepath).exists() else 0
+            task['files'].append({
+                'name': Path(sf_filepath).name,
+                'path': sf_filepath,
+                'size': file_size,
+                'display_name': "证券基金公司名单.xlsx",
+            })
+            task['progress']['current'] += 1
+
         # 1. 公募基金管理人名录
         if 'amac' in types:
             task['progress']['message'] = "正在爬取公募基金管理人名录..."
@@ -412,47 +455,6 @@ def process_institution_task(task_id: str, types: List[str]):
                     'path': amac_filepath,
                     'size': file_size,
                     'display_name': "公募基金管理人名录.xlsx",
-                })
-            task['progress']['current'] += 1
-
-        # 2. 银行保险法人名单
-        if 'bank_insurance' in types:
-            task['progress']['message'] = "正在爬取银行保险法人名单..."
-            logger.info(f"机构名录任务 {task_id}: 开始爬取银行保险法人名单")
-            bank_ins_data = fetch_all_institution_lists()
-            if bank_ins_data:
-                # 只取银行和保险数据
-                bi_data = {
-                    "bank": bank_ins_data.get("bank", []),
-                    "insurance": bank_ins_data.get("insurance", []),
-                }
-                bi_filepath = write_institution_excel(bi_data, output_dir=config.output_dir)
-                file_size = Path(bi_filepath).stat().st_size if Path(bi_filepath).exists() else 0
-                task['files'].append({
-                    'name': Path(bi_filepath).name,
-                    'path': bi_filepath,
-                    'size': file_size,
-                    'display_name': "银行保险法人名单.xlsx",
-                })
-            task['progress']['current'] += 1
-
-        # 3. 证券基金公司名单
-        if 'securities_fund' in types:
-            task['progress']['message'] = "正在爬取证券基金公司名单..."
-            logger.info(f"机构名录任务 {task_id}: 开始爬取证券基金公司名单")
-            sec_fund_data = fetch_all_institution_lists()
-            if sec_fund_data:
-                sf_data = {
-                    "securities": sec_fund_data.get("securities", []),
-                    "funds": sec_fund_data.get("funds", []),
-                }
-                sf_filepath = write_institution_excel(sf_data, output_dir=config.output_dir)
-                file_size = Path(sf_filepath).stat().st_size if Path(sf_filepath).exists() else 0
-                task['files'].append({
-                    'name': Path(sf_filepath).name,
-                    'path': sf_filepath,
-                    'size': file_size,
-                    'display_name': "证券基金公司名单.xlsx",
                 })
             task['progress']['current'] += 1
 

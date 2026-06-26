@@ -8,6 +8,7 @@ import requests
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urljoin
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ HEADERS = {
 }
 
 # ── NFRA 银行保险法人名单 ───────────────────────────────────
-# 银行业金融机构法人名单
+# 银行业金融机构法人名单（NFRA定期发布PDF）
 NFRA_BANK_LIST_URL = (
     "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.html"
     "?docId=1228300&generaltype=1&itemId=863"
@@ -34,7 +35,7 @@ NFRA_INSURANCE_LIST_URL = (
 )
 
 # ── CSRC 证券基金公司名单 ───────────────────────────────────
-# 上海辖区证券公司名录（全国性汇总可从上海局获取）
+# 上海辖区证券公司名录（上海局汇总全国证券公司）
 CSRC_SECURITIES_URL = (
     "http://www.csrc.gov.cn/shanghai/c103854/c7637721/content.shtml"
 )
@@ -45,7 +46,6 @@ CSRC_FUND_URL = (
 
 
 def _fetch_html(url: str, timeout: int = 30) -> Optional[str]:
-    """获取网页HTML"""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=timeout)
         resp.encoding = "utf-8"
@@ -58,7 +58,6 @@ def _fetch_html(url: str, timeout: int = 30) -> Optional[str]:
 
 
 def _download_file(url: str, timeout: int = 60) -> Optional[bytes]:
-    """下载文件"""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=timeout)
         if resp.status_code == 200:
@@ -88,34 +87,30 @@ def _parse_html_table(html: str) -> List[List[str]]:
     return rows
 
 
-def _find_xlsx_url(html: str) -> Optional[str]:
-    """从HTML页面中查找.xlsx附件链接"""
-    match = re.search(r'href="([^"]+\.xlsx)"', html, re.IGNORECASE)
-    if match:
-        url = match.group(1)
-        if not url.startswith("http"):
-            url = "http://www.csrc.gov.cn" + url
-        return url
+def _find_xlsx_url(html: str, base_url: str) -> Optional[str]:
+    """从HTML页面中查找附件xlsx/xls链接"""
+    for pattern in [r'href="([^"]+\.xlsx)"', r'href="([^"]+\.xls)"']:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            return urljoin(base_url, match.group(1))
     return None
 
 
-def _find_pdf_url(html: str) -> Optional[str]:
-    """从HTML页面中查找.pdf附件链接"""
+def _find_pdf_url(html: str, base_url: str) -> Optional[str]:
+    """从HTML页面中查找附件PDF链接"""
     pattern = re.compile(r'href="([^"]+\.pdf)"', re.IGNORECASE)
     for match in pattern.finditer(html):
-        url = match.group(1)
-        if not url.startswith("http"):
-            url = "https://www.nfra.gov.cn" + url
-        return url
+        return urljoin(base_url, match.group(1))
     return None
 
 
 def _parse_pdf_table(pdf_bytes: bytes) -> List[List[str]]:
-    """从PDF二进制数据中提取表格（简易正则方式）"""
+    """从PDF二进制数据中提取表格"""
+    from io import BytesIO
+
+    # 尝试 pdfplumber
     try:
-        # 尝试用 pdfplumber
         import pdfplumber
-        from io import BytesIO
 
         rows = []
         with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
@@ -127,28 +122,84 @@ def _parse_pdf_table(pdf_bytes: bytes) -> List[List[str]]:
                             rows.append([str(c).strip() if c else "" for c in row])
         return rows
     except ImportError:
-        logger.warning("pdfplumber未安装，尝试纯文本提取")
-        # 降级：纯文本提取
-        try:
-            from io import StringIO
-            from PyPDF2 import PdfReader
+        logger.warning("pdfplumber未安装，尝试PyPDF2")
 
-            reader = PdfReader(BytesIO(pdf_bytes))
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() or ""
+    # 降级：PyPDF2
+    try:
+        from PyPDF2 import PdfReader
 
-            lines = text.strip().split("\n")
-            rows = []
-            for line in lines:
-                # 按多个空格分割
-                parts = re.split(r"\s{2,}", line.strip())
-                if parts and any(p for p in parts):
-                    rows.append(parts)
-            return rows
-        except ImportError:
-            logger.warning("PyPDF2也未安装，无法解析PDF")
-            return []
+        reader = PdfReader(BytesIO(pdf_bytes))
+        text = ""
+        for page in reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + "\n"
+
+        lines = text.strip().split("\n")
+        rows = []
+        for line in lines:
+            parts = re.split(r"\s{2,}", line.strip())
+            if parts and any(p for p in parts):
+                rows.append(parts)
+        return rows
+    except ImportError:
+        logger.warning("PyPDF2也未安装，无法解析PDF")
+        return []
+
+
+def _parse_xlsx(data: bytes) -> List[List[str]]:
+    """解析Excel二进制数据（支持xlsx和xls格式）"""
+    from io import BytesIO
+
+    # 尝试 openpyxl (xlsx)
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
+        ws = wb.active
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            rows.append([str(c) if c is not None else "" for c in row])
+        wb.close()
+        return rows
+    except Exception:
+        pass
+
+    # 尝试 xlrd (xls)
+    try:
+        import xlrd
+        wb = xlrd.open_workbook(file_contents=data)
+        ws = wb.sheet_by_index(0)
+        rows = []
+        for r in range(ws.nrows):
+            rows.append([str(ws.cell_value(r, c)) if ws.cell_value(r, c) != "" else ""
+                         for c in range(ws.ncols)])
+        return rows
+    except ImportError:
+        logger.warning("xlrd未安装，无法解析.xls文件")
+    except Exception as e:
+        logger.warning(f"解析Excel失败: {e}")
+
+    return []
+
+
+def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
+    """将表格拆分为多个逻辑块"""
+    if not tables:
+        return []
+    chunks = []
+    current = []
+    header_keywords = ["序号", "中文全称", "机构名称", "公司名称", "名称"]
+    for row in tables:
+        row_str = "".join(row)
+        if any(kw in row_str for kw in header_keywords) and current:
+            if len(current) > 1:
+                chunks.append(current)
+            current = [row]
+        else:
+            current.append(row)
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
@@ -161,30 +212,27 @@ def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
     if html:
         tables = _parse_html_table(html)
         if tables:
-            # 找到表头确定列
-            for table_chunk in _chunk_tables(tables):
-                for row in table_chunk:
-                    if len(row) >= 3:
+            for chunk in _chunk_tables(tables):
+                for row in chunk[1:]:  # 跳过表头
+                    if len(row) >= 2:
                         result["bank"].append({
-                            "name": row[1] if len(row) > 1 else "",
+                            "name": row[1] if len(row) > 1 else row[0] if row else "",
                             "code": row[2] if len(row) > 2 else "",
                             "type": row[3] if len(row) > 3 else "",
                         })
         if not result["bank"]:
-            # 尝试下载PDF
-            pdf_url = _find_pdf_url(html)
+            pdf_url = _find_pdf_url(html, NFRA_BANK_LIST_URL)
             if pdf_url:
                 pdf_bytes = _download_file(pdf_url)
                 if pdf_bytes:
                     rows = _parse_pdf_table(pdf_bytes)
-                    for row in rows[1:]:  # 跳过表头
-                        if len(row) >= 3:
+                    for row in rows[1:]:
+                        if len(row) >= 2:
                             result["bank"].append({
-                                "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
+                                "name": row[1] if len(row) > 1 else row[0] if row else "",
                                 "code": row[2] if len(row) > 2 else "",
                                 "type": row[3] if len(row) > 3 else "",
                             })
-
     logger.info(f"银行法人名单: {len(result['bank'])} 家")
 
     # 获取保险名单
@@ -193,16 +241,16 @@ def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
     if html:
         tables = _parse_html_table(html)
         if tables:
-            for table_chunk in _chunk_tables(tables):
-                for row in table_chunk:
+            for chunk in _chunk_tables(tables):
+                for row in chunk[1:]:
                     if len(row) >= 2:
                         result["insurance"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
+                            "name": row[1] if len(row) > 1 else row[0] if row else "",
                             "code": row[2] if len(row) > 2 else "",
                             "type": row[3] if len(row) > 3 else "",
                         })
         if not result["insurance"]:
-            pdf_url = _find_pdf_url(html)
+            pdf_url = _find_pdf_url(html, NFRA_INSURANCE_LIST_URL)
             if pdf_url:
                 pdf_bytes = _download_file(pdf_url)
                 if pdf_bytes:
@@ -210,32 +258,12 @@ def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
                     for row in rows[1:]:
                         if len(row) >= 2:
                             result["insurance"].append({
-                                "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
+                                "name": row[1] if len(row) > 1 else row[0] if row else "",
                                 "code": row[2] if len(row) > 2 else "",
                                 "type": row[3] if len(row) > 3 else "",
                             })
-
     logger.info(f"保险法人名单: {len(result['insurance'])} 家")
     return result
-
-
-def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
-    """将表格拆分为多个逻辑块（跳过空行后的新表头）"""
-    if not tables:
-        return []
-    chunks = []
-    current = []
-    header_keywords = ["序号", "中文全称", "机构名称", "公司名称"]
-    for row in tables:
-        if any(kw in "".join(row) for kw in header_keywords) and current:
-            if current:
-                chunks.append(current)
-            current = [row]
-        else:
-            current.append(row)
-    if current:
-        chunks.append(current)
-    return chunks
 
 
 def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
@@ -246,7 +274,7 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
     logger.info("正在获取证券公司名录...")
     html = _fetch_html(CSRC_SECURITIES_URL)
     if html:
-        xlsx_url = _find_xlsx_url(html)
+        xlsx_url = _find_xlsx_url(html, CSRC_SECURITIES_URL)
         if xlsx_url:
             data = _download_file(xlsx_url)
             if data:
@@ -254,25 +282,25 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
                 for row in rows[1:]:
                     if len(row) >= 2:
                         result["securities"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
+                            "name": row[1] if len(row) > 1 else row[0] if row else "",
                             "addr": row[2] if len(row) > 2 else "",
                         })
         if not result["securities"]:
             tables = _parse_html_table(html)
-            for row in tables[1:]:
-                if len(row) >= 2:
-                    result["securities"].append({
-                        "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
-                        "addr": row[2] if len(row) > 2 else "",
-                    })
-
+            for chunk in _chunk_tables(tables):
+                for row in chunk[1:]:
+                    if len(row) >= 2:
+                        result["securities"].append({
+                            "name": row[1] if len(row) > 1 else row[0] if row else "",
+                            "addr": row[2] if len(row) > 2 else "",
+                        })
     logger.info(f"证券公司名录: {len(result['securities'])} 家")
 
     # 获取基金公司名录
     logger.info("正在获取基金管理公司名录...")
     html = _fetch_html(CSRC_FUND_URL)
     if html:
-        xlsx_url = _find_xlsx_url(html)
+        xlsx_url = _find_xlsx_url(html, CSRC_FUND_URL)
         if xlsx_url:
             data = _download_file(xlsx_url)
             if data:
@@ -280,38 +308,20 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
                 for row in rows[1:]:
                     if len(row) >= 2:
                         result["funds"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
+                            "name": row[1] if len(row) > 1 else row[0] if row else "",
                             "addr": row[2] if len(row) > 2 else "",
                         })
         if not result["funds"]:
             tables = _parse_html_table(html)
-            for row in tables[1:]:
-                if len(row) >= 2:
-                    result["funds"].append({
-                        "name": row[1] if len(row) > 1 else row[0] if len(row) > 0 else "",
-                        "addr": row[2] if len(row) > 2 else "",
-                    })
-
+            for chunk in _chunk_tables(tables):
+                for row in chunk[1:]:
+                    if len(row) >= 2:
+                        result["funds"].append({
+                            "name": row[1] if len(row) > 1 else row[0] if row else "",
+                            "addr": row[2] if len(row) > 2 else "",
+                        })
     logger.info(f"基金公司名录: {len(result['funds'])} 家")
     return result
-
-
-def _parse_xlsx(data: bytes) -> List[List[str]]:
-    """解析Excel二进制数据"""
-    try:
-        from io import BytesIO
-        from openpyxl import load_workbook
-
-        wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
-        ws = wb.active
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            rows.append([str(c) if c is not None else "" for c in row])
-        wb.close()
-        return rows
-    except Exception as e:
-        logger.warning(f"解析Excel失败: {e}")
-        return []
 
 
 def fetch_all_institution_lists() -> Dict[str, List[Dict]]:
@@ -362,51 +372,40 @@ def write_institution_excel(
                 c.alignment = align
                 c.border = border
 
-    # Sheet 1: 银行法人
-    ws1 = wb.active
-    bank_rows = [
-        [i, d.get("name", ""), d.get("code", ""), d.get("type", "")]
-        for i, d in enumerate(data.get("bank", []), 1)
+    # 根据提供的数据类型写入不同Sheet
+    sheet_specs = [
+        ("bank", "银行法人名单", ["序号", "机构名称", "机构编码", "机构类型"]),
+        ("insurance", "保险法人名单", ["序号", "机构名称", "机构编码", "机构类型"]),
+        ("securities", "证券公司名单", ["序号", "公司名称", "地址"]),
+        ("funds", "基金公司名单", ["序号", "公司名称", "地址"]),
     ]
-    _write_sheet(ws1, "银行法人名单", ["序号", "机构名称", "机构编码", "机构类型"], bank_rows)
-    ws1.column_dimensions["A"].width = 6
-    ws1.column_dimensions["B"].width = 40
-    ws1.column_dimensions["C"].width = 20
-    ws1.column_dimensions["D"].width = 18
 
-    # Sheet 2: 保险法人
-    ws2 = wb.create_sheet()
-    ins_rows = [
-        [i, d.get("name", ""), d.get("code", ""), d.get("type", "")]
-        for i, d in enumerate(data.get("insurance", []), 1)
-    ]
-    _write_sheet(ws2, "保险法人名单", ["序号", "机构名称", "机构编码", "机构类型"], ins_rows)
-    ws2.column_dimensions["A"].width = 6
-    ws2.column_dimensions["B"].width = 40
-    ws2.column_dimensions["C"].width = 20
-    ws2.column_dimensions["D"].width = 18
+    first = True
+    for key, title, headers in sheet_specs:
+        items = data.get(key, [])
+        if first:
+            ws = wb.active
+            first = False
+        else:
+            ws = wb.create_sheet()
 
-    # Sheet 3: 证券公司
-    ws3 = wb.create_sheet()
-    sec_rows = [
-        [i, d.get("name", ""), d.get("addr", "")]
-        for i, d in enumerate(data.get("securities", []), 1)
-    ]
-    _write_sheet(ws3, "证券公司名单", ["序号", "公司名称", "地址"], sec_rows)
-    ws3.column_dimensions["A"].width = 6
-    ws3.column_dimensions["B"].width = 40
-    ws3.column_dimensions["C"].width = 50
+        rows_data = []
+        for i, item in enumerate(items, 1):
+            if key == "securities" or key == "funds":
+                rows_data.append([i, item.get("name", ""), item.get("addr", "")])
+            else:
+                rows_data.append([i, item.get("name", ""), item.get("code", ""), item.get("type", "")])
 
-    # Sheet 4: 基金公司
-    ws4 = wb.create_sheet()
-    fund_rows = [
-        [i, d.get("name", ""), d.get("addr", "")]
-        for i, d in enumerate(data.get("funds", []), 1)
-    ]
-    _write_sheet(ws4, "基金公司名单", ["序号", "公司名称", "地址"], fund_rows)
-    ws4.column_dimensions["A"].width = 6
-    ws4.column_dimensions["B"].width = 40
-    ws4.column_dimensions["C"].width = 50
+        _write_sheet(ws, title, headers, rows_data)
+
+        # 列宽
+        ws.column_dimensions["A"].width = 6
+        ws.column_dimensions["B"].width = 40
+        if key in ("bank", "insurance"):
+            ws.column_dimensions["C"].width = 20
+            ws.column_dimensions["D"].width = 18
+        else:
+            ws.column_dimensions["C"].width = 50
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"金融机构法人名录_{timestamp}.xlsx"
