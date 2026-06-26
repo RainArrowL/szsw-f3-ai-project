@@ -52,6 +52,19 @@ ALLOWED_EXTENSIONS = {'txt', 'csv'}
 # 全局任务存储
 tasks: Dict[str, Dict] = {}
 
+# 全局JSON错误处理，防止返回HTML错误页
+@app.errorhandler(400)
+@app.errorhandler(404)
+@app.errorhandler(405)
+@app.errorhandler(500)
+def handle_api_error(e):
+    return jsonify({"success": False, "error": str(e)}), getattr(e, "code", 500)
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    logger.error(f"未捕获异常: {e}", exc_info=True)
+    return jsonify({"success": False, "error": f"服务器内部错误: {str(e)}"}), 500
+
 
 # ==================== 工具函数 ====================
 
@@ -411,7 +424,7 @@ def process_institution_task(task_id: str, types: List[str]):
                 "bank": bi_data.get("bank", []),
                 "insurance": bi_data.get("insurance", []),
             }
-            bi_filepath = write_institution_excel(bi_filtered, output_dir=config.output_dir)
+            bi_filepath = write_institution_excel(bi_filtered, output_dir=config.output_dir, prefix="银行保险法人名单")
             file_size = Path(bi_filepath).stat().st_size if Path(bi_filepath).exists() else 0
             task['files'].append({
                 'name': Path(bi_filepath).name,
@@ -432,7 +445,7 @@ def process_institution_task(task_id: str, types: List[str]):
                 "securities": sf_data.get("securities", []),
                 "funds": sf_data.get("funds", []),
             }
-            sf_filepath = write_institution_excel(sf_filtered, output_dir=config.output_dir)
+            sf_filepath = write_institution_excel(sf_filtered, output_dir=config.output_dir, prefix="证券基金公司名单")
             file_size = Path(sf_filepath).stat().st_size if Path(sf_filepath).exists() else 0
             task['files'].append({
                 'name': Path(sf_filepath).name,
@@ -474,7 +487,7 @@ def process_institution_task(task_id: str, types: List[str]):
 @app.route('/api/institutions', methods=['POST'])
 def fetch_institutions():
     """提交金融机构法人名录爬取任务"""
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     types = data.get('types', [])
 
     if not types:

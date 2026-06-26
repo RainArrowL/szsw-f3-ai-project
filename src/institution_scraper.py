@@ -23,15 +23,16 @@ HEADERS = {
 }
 
 # ── NFRA 银行保险法人名单 ───────────────────────────────────
-# 银行业金融机构法人名单（NFRA定期发布PDF）
-NFRA_BANK_LIST_URL = (
-    "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.html"
-    "?docId=1228300&generaltype=1&itemId=863"
+# NFRA 网站是 AngularJS SPA，requests 无法直接获取页面内容。
+# 直接使用 CDN 上的 PDF 文件（截至2025年6月末）。
+# 注意：这些 URL 可能随文件更新而变化，需要定期维护。
+NFRA_BANK_PDF_URL = (
+    "https://www.nfra.gov.cn/chinese/docfile/2025/"
+    "86c58b1ad810422c8fa6c6d0107f1626.pdf"
 )
-# 保险机构法人名单
-NFRA_INSURANCE_LIST_URL = (
-    "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.html"
-    "?docId=1228301&generaltype=1&itemId=863"
+NFRA_INSURANCE_PDF_URL = (
+    "https://www.nfra.gov.cn/chinese/docfile/2025/"
+    "2a78efc6d162484f8dfb8d0388b00320.pdf"
 )
 
 # ── CSRC 证券基金公司名单 ───────────────────────────────────
@@ -182,6 +183,30 @@ def _parse_xlsx(data: bytes) -> List[List[str]]:
     return []
 
 
+def _is_header_row(row: List[str], header_keywords: List[str] = None) -> bool:
+    """判断是否为表头行或无效行（需要跳过）"""
+    if header_keywords is None:
+        header_keywords = ["序号", "中文全称", "机构名称", "公司名称", "单位名称",
+                           "名称", "序号", "英文全称"]
+    if not row:
+        return True
+    name_col = row[1] if len(row) > 1 else row[0] if row else ""
+    # 空名称
+    if not name_col or not name_col.strip():
+        return True
+    # 表头关键词
+    for kw in header_keywords:
+        if kw in name_col:
+            return True
+    # 注释行（如"本月无变化"、"注："等）
+    if re.match(r'^(本月|注[：:]|说明|备注|截止)', name_col):
+        return True
+    # 非中文名称（纯英文/数字/特殊字符）
+    if not re.search(r'[\u4e00-\u9fff]', name_col):
+        return True
+    return False
+
+
 def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
     """将表格拆分为多个逻辑块"""
     if not tables:
@@ -202,66 +227,46 @@ def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
     return chunks
 
 
+def _download_nfra_pdf(url: str) -> Optional[bytes]:
+    """下载 NFRA PDF"""
+    logger.info(f"NFRA PDF: {url}")
+    return _download_file(url, timeout=120)
+
+
 def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
-    """获取银行保险法人名单"""
+    """获取银行保险法人名单（通过 NFRA CDN PDF 直接下载）"""
     result = {"bank": [], "insurance": []}
 
-    # 获取银行名单
+    # ── 银行名单 ──
     logger.info("正在获取银行业金融机构法人名单...")
-    html = _fetch_html(NFRA_BANK_LIST_URL)
-    if html:
-        tables = _parse_html_table(html)
-        if tables:
-            for chunk in _chunk_tables(tables):
-                for row in chunk[1:]:  # 跳过表头
-                    if len(row) >= 2:
-                        result["bank"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if row else "",
-                            "code": row[2] if len(row) > 2 else "",
-                            "type": row[3] if len(row) > 3 else "",
-                        })
-        if not result["bank"]:
-            pdf_url = _find_pdf_url(html, NFRA_BANK_LIST_URL)
-            if pdf_url:
-                pdf_bytes = _download_file(pdf_url)
-                if pdf_bytes:
-                    rows = _parse_pdf_table(pdf_bytes)
-                    for row in rows[1:]:
-                        if len(row) >= 2:
-                            result["bank"].append({
-                                "name": row[1] if len(row) > 1 else row[0] if row else "",
-                                "code": row[2] if len(row) > 2 else "",
-                                "type": row[3] if len(row) > 3 else "",
-                            })
+    pdf_bytes = _download_nfra_pdf(NFRA_BANK_PDF_URL)
+    if pdf_bytes:
+        rows = _parse_pdf_table(pdf_bytes)
+        for row in rows:
+            if _is_header_row(row):
+                continue
+            if len(row) >= 2:
+                result["bank"].append({
+                    "name": row[1] if len(row) > 1 else row[0] if row else "",
+                    "code": row[3] if len(row) > 3 else "",
+                    "type": row[4] if len(row) > 4 else "",
+                })
     logger.info(f"银行法人名单: {len(result['bank'])} 家")
 
-    # 获取保险名单
+    # ── 保险名单 ──
     logger.info("正在获取保险机构法人名单...")
-    html = _fetch_html(NFRA_INSURANCE_LIST_URL)
-    if html:
-        tables = _parse_html_table(html)
-        if tables:
-            for chunk in _chunk_tables(tables):
-                for row in chunk[1:]:
-                    if len(row) >= 2:
-                        result["insurance"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if row else "",
-                            "code": row[2] if len(row) > 2 else "",
-                            "type": row[3] if len(row) > 3 else "",
-                        })
-        if not result["insurance"]:
-            pdf_url = _find_pdf_url(html, NFRA_INSURANCE_LIST_URL)
-            if pdf_url:
-                pdf_bytes = _download_file(pdf_url)
-                if pdf_bytes:
-                    rows = _parse_pdf_table(pdf_bytes)
-                    for row in rows[1:]:
-                        if len(row) >= 2:
-                            result["insurance"].append({
-                                "name": row[1] if len(row) > 1 else row[0] if row else "",
-                                "code": row[2] if len(row) > 2 else "",
-                                "type": row[3] if len(row) > 3 else "",
-                            })
+    pdf_bytes = _download_nfra_pdf(NFRA_INSURANCE_PDF_URL)
+    if pdf_bytes:
+        rows = _parse_pdf_table(pdf_bytes)
+        for row in rows:
+            if _is_header_row(row):
+                continue
+            if len(row) >= 2:
+                result["insurance"].append({
+                    "name": row[1] if len(row) > 1 else row[0] if row else "",
+                    "code": row[3] if len(row) > 3 else "",
+                    "type": row[4] if len(row) > 4 else "",
+                })
     logger.info(f"保险法人名单: {len(result['insurance'])} 家")
     return result
 
@@ -279,7 +284,9 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
             data = _download_file(xlsx_url)
             if data:
                 rows = _parse_xlsx(data)
-                for row in rows[1:]:
+                for row in rows:
+                    if _is_header_row(row, ["单位名称", "公司名称", "序号"]):
+                        continue
                     if len(row) >= 2:
                         result["securities"].append({
                             "name": row[1] if len(row) > 1 else row[0] if row else "",
@@ -289,7 +296,7 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
             tables = _parse_html_table(html)
             for chunk in _chunk_tables(tables):
                 for row in chunk[1:]:
-                    if len(row) >= 2:
+                    if len(row) >= 2 and not _is_header_row(row):
                         result["securities"].append({
                             "name": row[1] if len(row) > 1 else row[0] if row else "",
                             "addr": row[2] if len(row) > 2 else "",
@@ -305,7 +312,9 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
             data = _download_file(xlsx_url)
             if data:
                 rows = _parse_xlsx(data)
-                for row in rows[1:]:
+                for row in rows:
+                    if _is_header_row(row, ["公司名称", "单位名称", "序号"]):
+                        continue
                     if len(row) >= 2:
                         result["funds"].append({
                             "name": row[1] if len(row) > 1 else row[0] if row else "",
@@ -315,7 +324,7 @@ def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
             tables = _parse_html_table(html)
             for chunk in _chunk_tables(tables):
                 for row in chunk[1:]:
-                    if len(row) >= 2:
+                    if len(row) >= 2 and not _is_header_row(row):
                         result["funds"].append({
                             "name": row[1] if len(row) > 1 else row[0] if row else "",
                             "addr": row[2] if len(row) > 2 else "",
@@ -340,6 +349,7 @@ def fetch_all_institution_lists() -> Dict[str, List[Dict]]:
 def write_institution_excel(
     data: Dict[str, List[Dict]],
     output_dir: str = "output",
+    prefix: str = "金融机构法人名录",
 ) -> str:
     """将法人名单写入Excel文件"""
     from openpyxl import Workbook
@@ -408,7 +418,7 @@ def write_institution_excel(
             ws.column_dimensions["C"].width = 50
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"金融机构法人名录_{timestamp}.xlsx"
+    filename = f"{prefix}_{timestamp}.xlsx"
     filepath = str(Path(output_dir) / filename)
     wb.save(filepath)
     logger.info(f"法人名录Excel已保存: {filepath}")

@@ -382,18 +382,7 @@ const institutionModule = createTaskModule({
     formId: 'institutionForm',
     submitBtnId: 'institutionSubmitBtn',
     apiUrl: '/api/institutions',
-    buildFormData: () => {
-        const types = [];
-        if (document.getElementById('instAmac').checked) types.push('amac');
-        if (document.getElementById('instBankIns').checked) types.push('bank_insurance');
-        if (document.getElementById('instSecFund').checked) types.push('securities_fund');
-
-        if (types.length === 0) {
-            alert('请至少勾选一种名录');
-            return null;
-        }
-        return new FormData();  // 通过JSON body传参
-    },
+    buildFormData: () => null,  // 由下方自定义提交逻辑处理（JSON body）
     resultId: 'institutionResult',
     progressId: 'institutionProgress',
     progressLabelId: 'institutionProgressLabel',
@@ -627,7 +616,7 @@ const penaltyModule = createTaskModule({
     formId: 'penaltyForm',
     submitBtnId: 'penaltySubmitBtn',
     apiUrl: '/api/penalty',
-    buildFormData: () => new FormData(),
+    buildFormData: () => null,  // 由下方自定义提交逻辑处理（JSON body）
     resultId: 'penaltyResult',
     progressId: 'penaltyProgress',
     progressLabelId: 'penaltyProgressLabel',
