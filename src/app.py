@@ -29,7 +29,7 @@ from excel_writer import write_company_excel, write_industry_avg_excel, write_me
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
 from penalty_scraper import fetch_all_penalty, write_penalty_excel
-from institution_scraper import fetch_all_institution_lists, write_institution_excel
+from institution_scraper import fetch_all_institution_lists, write_institution_excel, download_nfra_pdfs
 from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
 

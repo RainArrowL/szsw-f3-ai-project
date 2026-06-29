@@ -235,10 +235,44 @@ def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
     return chunks
 
 
-def _download_nfra_pdf(url: str) -> Optional[bytes]:
-    """下载 NFRA PDF"""
-    logger.info(f"NFRA PDF: {url}")
-    return _download_file(url, timeout=120)
+def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
+    """直接下载 NFRA 银行保险法人名单 PDF 文件（不转 Excel）
+
+    NFRA 导航路径：
+      www.nfra.gov.cn → 政务信息 → 法定主动公开内容 → 机构监管 → 综合
+
+    Returns:
+        下载的 PDF 文件路径列表
+    """
+    from urllib.parse import urlparse
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    files = []
+    for label, url in [
+        ("银行业金融机构法人名单", NFRA_BANK_PDF_URL),
+        ("保险机构法人名单", NFRA_INSURANCE_PDF_URL),
+    ]:
+        logger.info(f"正在下载 {label} PDF...")
+        pdf_bytes = _download_file(url, timeout=120)
+        if not pdf_bytes:
+            logger.warning(f"下载失败: {label}")
+            continue
+
+        # 从 URL 提取原始文件名，或使用描述性名称
+        parsed = urlparse(url)
+        orig_name = Path(parsed.path).name
+        if not orig_name.endswith(".pdf"):
+            orig_name = f"{label}.pdf"
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{label}_{timestamp}.pdf"
+        filepath = Path(output_dir) / filename
+        filepath.write_bytes(pdf_bytes)
+        logger.info(f"{label} PDF 已保存: {filepath} ({len(pdf_bytes)} bytes)")
+        files.append(str(filepath))
+
+    return files
 
 
 def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
