@@ -23,17 +23,19 @@ HEADERS = {
 }
 
 # ── NFRA 银行保险法人名单 ───────────────────────────────────
-# NFRA 网站是 AngularJS SPA，requests 无法直接获取页面内容。
-# 直接使用 CDN 上的 PDF 文件（截至2025年6月末）。
-# 注意：这些 URL 可能随文件更新而变化，需要定期维护。
-NFRA_BANK_PDF_URL = (
+# NFRA 网站是 AngularJS SPA，通过内部 API 链动态发现 PDF 链接。
+# API 导航路径：政务信息(itemId=923) → 政府信息公开(924) → 机构监管(862) → 综合(863)
+# 以下为静态备用 URL（当动态发现失败时使用）
+NFRA_BANK_PDF_URL_FALLBACK = (
     "https://www.nfra.gov.cn/chinese/docfile/2025/"
     "86c58b1ad810422c8fa6c6d0107f1626.pdf"
 )
-NFRA_INSURANCE_PDF_URL = (
+NFRA_INSURANCE_PDF_URL_FALLBACK = (
     "https://www.nfra.gov.cn/chinese/docfile/2025/"
     "2a78efc6d162484f8dfb8d0388b00320.pdf"
 )
+
+NFRA_BASE_URL = "https://www.nfra.gov.cn"
 
 # ── CSRC 证券基金期货公司名录 ───────────────────────────────────
 # 上海辖区证券公司名录（上海局汇总全国证券公司）
@@ -59,6 +61,19 @@ def _fetch_html(url: str, timeout: int = 30) -> Optional[str]:
         logger.warning(f"请求失败 {url}: HTTP {resp.status_code}")
     except Exception as e:
         logger.warning(f"请求异常 {url}: {e}")
+    return None
+
+
+def _fetch_json(url: str, timeout: int = 30) -> Optional[dict]:
+    """请求 JSON API，返回解析后的 dict"""
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=timeout)
+        resp.encoding = "utf-8"
+        if resp.status_code == 200:
+            return resp.json()
+        logger.warning(f"JSON API 请求失败 {url}: HTTP {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"JSON API 请求异常 {url}: {e}")
     return None
 
 
@@ -235,35 +250,125 @@ def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
     return chunks
 
 
-def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
-    """直接下载 NFRA 银行保险法人名单 PDF 文件（不转 Excel）
+def _discover_nfra_pdf_urls() -> List[Tuple[str, str]]:
+    """通过 NFRA 内部 API 链动态发现最新的银行/保险法人名单 PDF 链接
 
-    NFRA 导航路径：
+    API 导航路径（通过 itemId 链）：
+      www.nfra.gov.cn → 政务信息(923) → 政府信息公开(924) → 机构监管(862) → 综合(863)
+
+    综合栏目下的文档列表中，通过标题匹配找到：
+      - "银行业金融机构法人名单"（排除"外国银行"等非主线名单）
+      - "保险机构法人名单"（排除"保险中介"、"保险专业中介"等）
+
+    Returns:
+        [(label, pdf_url), ...] 列表，如 [("银行业金融机构法人名单", "https://..."), ...]
+    """
+    logger.info("正在动态发现 NFRA 银行保险法人名单 PDF 链接...")
+
+    # 综合栏目的 itemId 已知且稳定（由 API 导航路径确定）
+    item_id = "863"
+
+    # 获取「综合」栏目下的文档列表
+    list_url = (
+        f"{NFRA_BASE_URL}/cbircweb/DocInfo/SelectDocByItemIdAndChild"
+        f"?itemId={item_id}&pageSize=50&pageIndex=1"
+    )
+    data = _fetch_json(list_url)
+    if not data or "data" not in data:
+        logger.warning("无法获取综合栏目文档列表，回退到静态 URL")
+        return []
+
+    rows = data["data"].get("rows", [])
+    logger.info(f"综合栏目共 {len(rows)} 条文档")
+
+    # 按标题匹配银行和保险名单
+    bank_doc_id = None
+    insurance_doc_id = None
+
+    for row in rows:
+        title = row.get("docTitle", "")
+        doc_id = str(row.get("docId", ""))
+
+        if not bank_doc_id:
+            if "银行业金融机构法人名单" in title and "外国银行" not in title:
+                bank_doc_id = doc_id
+                logger.info(f"找到银行名单: {title} (docId={doc_id})")
+
+        if not insurance_doc_id:
+            if "保险机构法人名单" in title and "中介" not in title:
+                insurance_doc_id = doc_id
+                logger.info(f"找到保险名单: {title} (docId={doc_id})")
+
+        if bank_doc_id and insurance_doc_id:
+            break
+
+    if not bank_doc_id and not insurance_doc_id:
+        logger.warning("未在综合栏目中找到银行/保险法人名单")
+        return []
+
+    # 获取文档详情，提取附件 CDN PDF URL
+    results = []
+    for label, doc_id in [("银行业金融机构法人名单", bank_doc_id),
+                           ("保险机构法人名单", insurance_doc_id)]:
+        if not doc_id:
+            logger.warning(f"未找到 {label} 的 docId")
+            continue
+
+        detail_url = f"{NFRA_BASE_URL}/cbircweb/DocInfo/SelectByDocId?docId={doc_id}"
+        detail = _fetch_json(detail_url)
+        if not detail or "data" not in detail:
+            logger.warning(f"获取 {label} 详情失败")
+            continue
+
+        doc_data = detail["data"]
+        attachments = doc_data.get("attachmentInfoVOList", [])
+        if not attachments:
+            logger.warning(f"{label} 没有附件")
+            continue
+
+        # 附件 PDF URL 在 urlOtherName 字段
+        pdf_rel_path = attachments[0].get("urlOtherName", "")
+        if not pdf_rel_path:
+            logger.warning(f"{label} 附件 URL 为空")
+            continue
+
+        pdf_url = urljoin(NFRA_BASE_URL, pdf_rel_path)
+        logger.info(f"{label} PDF URL: {pdf_url}")
+        results.append((label, pdf_url))
+
+    return results
+
+
+def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
+    """动态发现并下载 NFRA 银行保险法人名单 PDF 文件（不转 Excel）
+
+    通过 NFRA 内部 API 链动态发现最新 PDF 链接：
       www.nfra.gov.cn → 政务信息 → 法定主动公开内容 → 机构监管 → 综合
+      → 找到「银行业金融机构法人名单」和「保险机构法人名单」PDF
 
     Returns:
         下载的 PDF 文件路径列表
     """
-    from urllib.parse import urlparse
-
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    # 动态发现 PDF 链接
+    discovered = _discover_nfra_pdf_urls()
+
+    # 如果动态发现失败，回退到静态备用 URL
+    if not discovered:
+        logger.warning("动态发现失败，使用静态备用 URL")
+        discovered = [
+            ("银行业金融机构法人名单", NFRA_BANK_PDF_URL_FALLBACK),
+            ("保险机构法人名单", NFRA_INSURANCE_PDF_URL_FALLBACK),
+        ]
+
     files = []
-    for label, url in [
-        ("银行业金融机构法人名单", NFRA_BANK_PDF_URL),
-        ("保险机构法人名单", NFRA_INSURANCE_PDF_URL),
-    ]:
-        logger.info(f"正在下载 {label} PDF...")
+    for label, url in discovered:
+        logger.info(f"正在下载 {label} PDF: {url}")
         pdf_bytes = _download_file(url, timeout=120)
         if not pdf_bytes:
             logger.warning(f"下载失败: {label}")
             continue
-
-        # 从 URL 提取原始文件名，或使用描述性名称
-        parsed = urlparse(url)
-        orig_name = Path(parsed.path).name
-        if not orig_name.endswith(".pdf"):
-            orig_name = f"{label}.pdf"
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{label}_{timestamp}.pdf"
@@ -281,7 +386,7 @@ def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
 
     # ── 银行名单 ──
     logger.info("正在获取银行业金融机构法人名单...")
-    pdf_bytes = _download_nfra_pdf(NFRA_BANK_PDF_URL)
+    pdf_bytes = _download_file(NFRA_BANK_PDF_URL_FALLBACK)
     if pdf_bytes:
         rows = _parse_pdf_table(pdf_bytes)
         for row in rows:
@@ -297,7 +402,7 @@ def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
 
     # ── 保险名单 ──
     logger.info("正在获取保险机构法人名单...")
-    pdf_bytes = _download_nfra_pdf(NFRA_INSURANCE_PDF_URL)
+    pdf_bytes = _download_file(NFRA_INSURANCE_PDF_URL_FALLBACK)
     if pdf_bytes:
         rows = _parse_pdf_table(pdf_bytes)
         for row in rows:
