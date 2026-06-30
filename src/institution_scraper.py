@@ -468,15 +468,16 @@ def _copy_xlsx_sheet(wb_out, data: bytes, sheet_name: str):
             ws_out.column_dimensions[col_letter].width = ws_src.column_dimensions[col_letter].width
 
     # 复制每个单元格的值和样式
+    # 只保留边框和对齐，不复制背景填充和字体颜色（避免绿色背景黄色文字）
     for row in ws_src.iter_rows():
         for cell in row:
             new_cell = ws_out.cell(row=cell.row, column=cell.column, value=cell.value)
             if cell.has_style:
-                new_cell.font = copy(cell.font)
-                new_cell.fill = copy(cell.fill)
                 new_cell.border = copy(cell.border)
                 new_cell.alignment = copy(cell.alignment)
                 new_cell.number_format = cell.number_format
+                # 不复制字体（默认白底黑字）
+                # 不复制背景填充（保持默认白色）
 
     wb_src.close()
     logger.info(f"已复制 {sheet_name}（xlsx，{ws_src.max_row} 行 × {ws_src.max_column} 列）")
