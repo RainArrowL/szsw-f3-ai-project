@@ -380,6 +380,125 @@ def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
     return files
 
 
+def download_csrc_to_combined_xlsx(output_dir: str = "output") -> str:
+    """下载 CSRC 证券/基金/期货公司名录附件，合并为一个 xlsx 文件
+
+    从 CSRC 页面找到附件链接（xlsx/xls），下载原始文件后合并到一个 xlsx：
+      - Sheet「证券公司名录」— 保留原始格式
+      - Sheet「基金管理公司名录」— 保留原始格式
+      - Sheet「期货公司名录」— 保留原始格式
+
+    Returns:
+        合并后的 xlsx 文件路径，失败返回空字符串
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    sources = [
+        ("证券公司名录", CSRC_SECURITIES_URL),
+        ("基金管理公司名录", CSRC_FUND_URL),
+        ("期货公司名录", CSRC_FUTURES_URL),
+    ]
+
+    wb_out = Workbook()
+    # 删除默认的 Sheet
+    wb_out.remove(wb_out.active)
+
+    for label, page_url in sources:
+        logger.info(f"正在获取 {label} 页面: {page_url}")
+        html = _fetch_html(page_url)
+        if not html:
+            logger.warning(f"无法访问 {label} 页面")
+            continue
+
+        attachment_url = _find_xlsx_url(html, page_url)
+        if not attachment_url:
+            logger.warning(f"{label} 页面未找到附件链接")
+            continue
+
+        logger.info(f"正在下载 {label}: {attachment_url}")
+        data = _download_file(attachment_url, timeout=120)
+        if not data:
+            logger.warning(f"下载 {label} 失败")
+            continue
+
+        ext = Path(attachment_url.split("?")[0]).suffix.lower()
+        if ext == ".xlsx":
+            _copy_xlsx_sheet(wb_out, data, label)
+        else:
+            _copy_xls_sheet(wb_out, data, label)
+
+    if not wb_out.sheetnames:
+        logger.warning("没有成功下载任何名录")
+        return ""
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"证券基金期货公司名录_{timestamp}.xlsx"
+    filepath = Path(output_dir) / filename
+    wb_out.save(str(filepath))
+    logger.info(f"合并名录已保存: {filepath}")
+    return str(filepath)
+
+
+def _copy_xlsx_sheet(wb_out, data: bytes, sheet_name: str):
+    """将 xlsx 文件的第一个 sheet 复制到目标 workbook，保留格式"""
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from openpyxl.utils import get_column_letter
+    from copy import copy
+
+    wb_src = load_workbook(BytesIO(data))
+    ws_src = wb_src.active
+    ws_out = wb_out.create_sheet(title=sheet_name)
+
+    # 复制合并单元格
+    for merged_range in ws_src.merged_cells.ranges:
+        ws_out.merge_cells(str(merged_range))
+
+    # 复制行高和列宽
+    for row_idx in range(1, ws_src.max_row + 1):
+        if ws_src.row_dimensions[row_idx].height:
+            ws_out.row_dimensions[row_idx].height = ws_src.row_dimensions[row_idx].height
+    for col_idx in range(1, ws_src.max_column + 1):
+        col_letter = get_column_letter(col_idx)
+        if ws_src.column_dimensions[col_letter].width:
+            ws_out.column_dimensions[col_letter].width = ws_src.column_dimensions[col_letter].width
+
+    # 复制每个单元格的值和样式
+    for row in ws_src.iter_rows():
+        for cell in row:
+            new_cell = ws_out.cell(row=cell.row, column=cell.column, value=cell.value)
+            if cell.has_style:
+                new_cell.font = copy(cell.font)
+                new_cell.fill = copy(cell.fill)
+                new_cell.border = copy(cell.border)
+                new_cell.alignment = copy(cell.alignment)
+                new_cell.number_format = cell.number_format
+
+    wb_src.close()
+    logger.info(f"已复制 {sheet_name}（xlsx，{ws_src.max_row} 行 × {ws_src.max_column} 列）")
+
+
+def _copy_xls_sheet(wb_out, data: bytes, sheet_name: str):
+    """将 xls 文件的第一个 sheet 数据写入目标 workbook"""
+    from io import BytesIO
+    import xlrd
+
+    wb_src = xlrd.open_workbook(file_contents=data)
+    ws_src = wb_src.sheet_by_index(0)
+    ws_out = wb_out.create_sheet(title=sheet_name)
+
+    for r in range(ws_src.nrows):
+        for c in range(ws_src.ncols):
+            cell_value = ws_src.cell_value(r, c)
+            ws_out.cell(row=r + 1, column=c + 1, value=cell_value if cell_value != "" else None)
+
+    logger.info(f"已复制 {sheet_name}（xls，{ws_src.nrows} 行 × {ws_src.ncols} 列）")
+
+
 def download_csrc_files(output_dir: str = "output") -> List[str]:
     """直接下载 CSRC 证券/基金/期货公司名录附件文件（不转 Excel）
 

@@ -29,7 +29,7 @@ from excel_writer import write_company_excel, write_industry_avg_excel, write_me
 from industry_avg import compute_all_industry_averages, get_company_industry
 from amac_scraper import fetch_fund_manager_list, write_amac_excel
 from penalty_scraper import fetch_all_penalty, write_penalty_excel
-from institution_scraper import fetch_all_institution_lists, write_institution_excel, download_nfra_pdfs, download_csrc_files
+from institution_scraper import fetch_all_institution_lists, write_institution_excel, download_nfra_pdfs, download_csrc_to_combined_xlsx
 from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
 
@@ -432,26 +432,16 @@ def process_institution_task(task_id: str, types: List[str]):
             task['progress']['current'] += 1
 
         if 'securities_fund' in types:
-            task['progress']['message'] = "正在下载证券基金期货公司名录附件..."
-            logger.info(f"机构名录任务 {task_id}: 开始下载证券基金期货公司名录附件")
-            sf_files = download_csrc_files(output_dir=config.output_dir)
-            for fp in sf_files:
-                file_size = Path(fp).stat().st_size if Path(fp).exists() else 0
-                stem = Path(fp).stem
-                if "证券" in stem:
-                    label = "证券公司名录"
-                elif "基金" in stem:
-                    label = "基金管理公司名录"
-                elif "期货" in stem:
-                    label = "期货公司名录"
-                else:
-                    label = stem
-                ext = Path(fp).suffix
+            task['progress']['message'] = "正在下载证券基金期货公司名录..."
+            logger.info(f"机构名录任务 {task_id}: 开始下载证券基金期货公司名录")
+            sf_filepath = download_csrc_to_combined_xlsx(output_dir=config.output_dir)
+            if sf_filepath:
+                file_size = Path(sf_filepath).stat().st_size if Path(sf_filepath).exists() else 0
                 task['files'].append({
-                    'name': Path(fp).name,
-                    'path': fp,
+                    'name': Path(sf_filepath).name,
+                    'path': sf_filepath,
                     'size': file_size,
-                    'display_name': f"{label}{ext}",
+                    'display_name': "证券基金期货公司名录.xlsx",
                 })
             task['progress']['current'] += 1
 
