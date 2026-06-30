@@ -380,6 +380,54 @@ def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
     return files
 
 
+def download_csrc_files(output_dir: str = "output") -> List[str]:
+    """直接下载 CSRC 证券/基金/期货公司名录附件文件（不转 Excel）
+
+    从 CSRC 页面找到附件链接（xlsx/xls），下载原始文件。
+
+    Returns:
+        下载的文件路径列表
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    sources = [
+        ("证券公司名录", CSRC_SECURITIES_URL),
+        ("基金管理公司名录", CSRC_FUND_URL),
+        ("期货公司名录", CSRC_FUTURES_URL),
+    ]
+
+    files = []
+    for label, page_url in sources:
+        logger.info(f"正在获取 {label} 页面: {page_url}")
+        html = _fetch_html(page_url)
+        if not html:
+            logger.warning(f"无法访问 {label} 页面")
+            continue
+
+        # 查找附件链接（xlsx/xls）
+        attachment_url = _find_xlsx_url(html, page_url)
+        if not attachment_url:
+            logger.warning(f"{label} 页面未找到附件链接")
+            continue
+
+        logger.info(f"正在下载 {label}: {attachment_url}")
+        data = _download_file(attachment_url, timeout=120)
+        if not data:
+            logger.warning(f"下载 {label} 失败")
+            continue
+
+        # 保留原始文件扩展名
+        ext = Path(attachment_url.split("?")[0]).suffix or ".xlsx"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{label}_{timestamp}{ext}"
+        filepath = Path(output_dir) / filename
+        filepath.write_bytes(data)
+        logger.info(f"{label} 已保存: {filepath} ({len(data)} bytes)")
+        files.append(str(filepath))
+
+    return files
+
+
 def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
     """获取银行保险法人名单（通过 NFRA CDN PDF 直接下载）"""
     result = {"bank": [], "insurance": []}
