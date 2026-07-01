@@ -1,16 +1,8 @@
 /**
- * 年报财务数据获取工具 - 前端交互逻辑
- * 模块1: 年报数据爬取 (含行业均值)
- * 模块2: 金融机构名录
- * 模块3: 深交所日度概况
- * 模块4: 分红公告查询
- * 模块5: 监管处罚信息
+ * 智览金融 财数贯通 - 前端交互逻辑
+ * 新布局：标签导航 + 左侧表单 + 右侧统一结果面板
  */
-
-// ==================== 常量 ====================
 const POLL_INTERVAL = 1500;
-
-// 默认企业名单
 const DEFAULT_COMPANIES = `平安银行股份有限公司
 招商银行股份有限公司
 国银金融租赁股份有限公司
@@ -22,587 +14,127 @@ const DEFAULT_COMPANIES = `平安银行股份有限公司
 中国平安保险（集团）股份有限公司
 阳光保险集团股份有限公司`;
 
-// ==================== 模块抽象 ====================
+// ==================== 统一结果面板 ====================
 
-/**
- * 创建一个独立的任务模块
- * @param {Object} cfg - 配置
- * @param {string} cfg.formId - 表单元素ID
- * @param {string} cfg.submitBtnId - 提交按钮ID
- * @param {string} cfg.apiUrl - 提交API地址
- * @param {Function} cfg.buildFormData - 构建FormData的函数，返回FormData或null（校验失败）
- * @param {string} cfg.resultId - 结果容器ID
- * @param {string} cfg.progressId - 进度区域ID
- * @param {string} cfg.progressLabelId - 进度标签ID
- * @param {string} cfg.progressPercentId - 进度百分比ID
- * @param {string} cfg.progressFillId - 进度条填充ID
- * @param {string} cfg.progressMessageId - 进度消息ID
- * @param {string} cfg.resultSectionId - 结果区域ID
- * @param {string} cfg.resultStatusId - 结果状态ID
- * @param {string} cfg.fileListId - 文件列表ID
- */
-function createTaskModule(cfg) {
-    const els = {
-        form: document.getElementById(cfg.formId),
-        submitBtn: document.getElementById(cfg.submitBtnId),
-        result: document.getElementById(cfg.resultId),
-        progress: document.getElementById(cfg.progressId),
-        progressLabel: document.getElementById(cfg.progressLabelId),
-        progressPercent: document.getElementById(cfg.progressPercentId),
-        progressFill: document.getElementById(cfg.progressFillId),
-        progressMessage: document.getElementById(cfg.progressMessageId),
-        resultSection: document.getElementById(cfg.resultSectionId),
-        resultStatus: document.getElementById(cfg.resultStatusId),
-        fileList: document.getElementById(cfg.fileListId),
-    };
+const resultsPanel = {
+    list: document.getElementById('resultsList'),
+    empty: document.getElementById('resultsEmpty'),
+    count: document.getElementById('resultsCount'),
+    tasks: new Map(),  // taskId -> card element
 
-    let pollTimer = null;
+    showEmpty(show) {
+        this.empty.style.display = show ? '' : 'none';
+        this.list.style.display = show ? 'none' : '';
+    },
 
-    function setDisabled(disabled) {
-        els.submitBtn.disabled = disabled;
-        if (disabled) {
-            els.submitBtn.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning">
-                    <circle cx="12" cy="12" r="10" stroke-opacity="0.3"/>
-                    <path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/>
-                </svg>
-                处理中...
-            `;
-        } else {
-            els.submitBtn.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                开始获取
-            `;
-        }
-    }
-
-    function showResult() {
-        els.result.style.display = 'block';
-        els.progress.style.display = 'block';
-        els.resultSection.style.display = 'none';
-        els.progressFill.style.width = '0%';
-        els.progressPercent.textContent = '0%';
-        els.progressMessage.textContent = '正在启动...';
-    }
-
-    function showSuccess(task) {
-        els.progress.style.display = 'none';
-        els.resultSection.style.display = 'block';
-        els.resultStatus.className = 'result-status success';
-        els.resultStatus.textContent = '任务完成！共生成 ' + task.files.length + ' 个文件';
-
-        els.fileList.innerHTML = '';
-        task.files.forEach((f) => {
-            const sizeMB = (f.size / (1024 * 1024)).toFixed(2);
-            const item = document.createElement('div');
-            item.className = 'file-item';
-            item.innerHTML = `
-                <div class="file-info">
-                    <div class="file-name">${escapeHtml(f.display_name || f.name)}</div>
-                    <div class="file-size">${sizeMB > 0 ? sizeMB + ' MB' : (f.size ? (f.size / 1024).toFixed(0) + ' KB' : '')}</div>
+    createCard(taskId, label) {
+        this.showEmpty(false);
+        const card = document.createElement('div');
+        card.className = 'task-card';
+        card.id = 'task-' + taskId;
+        card.innerHTML = `
+            <div class="task-card-header">
+                <div class="task-card-title">
+                    <span class="dot running"></span>
+                    <span>${escapeHtml(label)}</span>
                 </div>
-                <a class="download-btn" href="/download/${encodeURIComponent(f.name)}" download>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                    下载
-                </a>
-            `;
-            els.fileList.appendChild(item);
-        });
-    }
+                <span class="task-card-time">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="task-progress">
+                <div class="progress-track">
+                    <div class="progress-fill" style="width:0%"></div>
+                </div>
+                <div class="progress-text">正在启动...</div>
+            </div>
+        `;
+        this.list.prepend(card);
+        this.tasks.set(taskId, card);
+        this.updateCount();
+        return card;
+    },
 
-    function showError(message) {
-        els.progress.style.display = 'none';
-        els.resultSection.style.display = 'block';
-        els.resultStatus.className = 'result-status error';
-        els.resultStatus.textContent = '错误: ' + message;
-        els.fileList.innerHTML = '';
-    }
-
-    function updateProgress(task) {
+    updateProgress(taskId, task) {
+        const card = this.tasks.get(taskId);
+        if (!card) return;
         const current = task.progress.current;
         const total = task.progress.total;
         const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+        const fill = card.querySelector('.progress-fill');
+        const text = card.querySelector('.progress-text');
+        if (fill) fill.style.width = pct + '%';
+        if (text) text.textContent = task.progress.message || '';
+    },
 
-        els.progressPercent.textContent = pct + '%';
-        els.progressFill.style.width = pct + '%';
-        els.progressMessage.textContent = task.progress.message;
-        els.progressLabel.textContent = task.status === 'done' ? '完成' : '正在处理...';
-    }
+    setDone(taskId, task) {
+        const card = this.tasks.get(taskId);
+        if (!card) return;
+        const dot = card.querySelector('.dot');
+        if (dot) { dot.className = 'dot done'; }
+        const fill = card.querySelector('.progress-fill');
+        if (fill) fill.style.width = '100%';
+        const text = card.querySelector('.progress-text');
+        if (text) text.textContent = '完成';
 
-    function pollProgress(taskId) {
+        // 移除进度条，添加文件列表
+        const progress = card.querySelector('.task-progress');
+        if (progress) progress.remove();
 
-        pollTimer = setInterval(async () => {
-            try {
-                const resp = await fetch(`/api/progress/${taskId}`);
-                const data = await resp.json();
-
-                if (!data.success) {
-                    clearInterval(pollTimer);
-                    showError(data.error || '查询进度失败');
-                    setDisabled(false);
-                    return;
-                }
-
-                const task = data.task;
-                updateProgress(task);
-
-                if (task.status === 'done') {
-                    clearInterval(pollTimer);
-                    showSuccess(task);
-                    setDisabled(false);
-                } else if (task.status === 'error') {
-                    clearInterval(pollTimer);
-                    showError(task.error || '处理失败');
-                    setDisabled(false);
-                }
-            } catch (err) {
-                clearInterval(pollTimer);
-                showError('网络错误: ' + err.message);
-                setDisabled(false);
-            }
-        }, POLL_INTERVAL);
-    }
-
-    // 表单提交
-    els.form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const formData = cfg.buildFormData();
-        if (!formData) return;
-
-        setDisabled(true);
-        showResult();
-
-        try {
-            const resp = await fetch(cfg.apiUrl, {
-                method: 'POST',
-                body: formData,
+        if (task.files && task.files.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'task-files';
+            task.files.forEach(f => {
+                const size = f.size ? (f.size >= 1048576 ? (f.size / 1048576).toFixed(2) + ' MB' : (f.size / 1024).toFixed(0) + ' KB') : '';
+                filesDiv.innerHTML += `
+                    <div class="file-row">
+                        <div class="file-row-info">
+                            <div class="file-row-name">${escapeHtml(f.display_name || f.name)}</div>
+                            <div class="file-row-size">${size}</div>
+                        </div>
+                        <a class="file-row-dl" href="/download/${encodeURIComponent(f.name)}" download>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            下载
+                        </a>
+                    </div>`;
             });
-            const data = await resp.json();
-
-            if (!data.success) {
-                showError(data.error || '请求失败');
-                setDisabled(false);
-                return;
-            }
-
-            pollProgress(data.task_id);
-        } catch (err) {
-            showError('网络错误: ' + err.message);
-            setDisabled(false);
+            card.appendChild(filesDiv);
         }
+    },
+
+    setError(taskId, message) {
+        const card = this.tasks.get(taskId);
+        if (!card) return;
+        const dot = card.querySelector('.dot');
+        if (dot) { dot.className = 'dot error'; }
+        const progress = card.querySelector('.task-progress');
+        if (progress) progress.remove();
+        const err = document.createElement('div');
+        err.className = 'task-error';
+        err.textContent = '错误: ' + message;
+        card.appendChild(err);
+    },
+
+    updateCount() {
+        this.count.textContent = this.tasks.size + ' 个任务';
+    }
+};
+
+// ==================== 标签切换 ====================
+
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const name = tab.dataset.tab;
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById('panel-' + name).classList.add('active');
     });
-
-    return {
-        setDisabled,
-        showResult,
-        showError,
-        showSuccess,
-        pollProgress,
-    };
-}
-
-// ==================== 模块1: 年报数据爬取 ====================
-
-const startYearEl = document.getElementById('startYear');
-const endYearEl = document.getElementById('endYear');
-const textInput = document.getElementById('textInput');
-const fileInput = document.getElementById('fileInput');
-const uploadArea = document.getElementById('uploadArea');
-const fileInfoDiv = document.getElementById('fileInfo');
-const fileNameSpan = document.getElementById('fileName');
-const fileRemoveBtn = document.getElementById('fileRemove');
-const uploadContent = document.querySelector('.upload-area .upload-content');
-const industryAvgToggle = document.getElementById('industryAvgToggle');
-const mergeReportsToggle = document.getElementById('mergeReportsToggle');
-
-function initYearSelectors() {
-    const currentYear = new Date().getFullYear();
-    const startYear = 1990;
-
-    for (let y = currentYear; y >= startYear; y--) {
-        const opt1 = document.createElement('option');
-        opt1.value = y;
-        opt1.textContent = y + '年';
-        startYearEl.appendChild(opt1);
-
-        const opt2 = document.createElement('option');
-        opt2.value = y;
-        opt2.textContent = y + '年';
-        endYearEl.appendChild(opt2);
-    }
-
-    startYearEl.value = 2021;
-    endYearEl.value = 2025;
-}
-
-function validateYearRange() {
-    const start = parseInt(startYearEl.value);
-    const end = parseInt(endYearEl.value);
-    if (start && end && start > end) {
-        [startYearEl.value, endYearEl.value] = [endYearEl.value, startYearEl.value];
-    }
-}
-
-// 文件上传处理
-function showFileInfo(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['txt', 'csv'].includes(ext)) {
-        alert('仅支持 .txt 和 .csv 文件');
-        fileInput.value = '';
-        return;
-    }
-    uploadContent.style.display = 'none';
-    fileInfoDiv.style.display = 'flex';
-    fileNameSpan.textContent = file.name;
-    // 上传文件时清空文本输入框，避免默认名单干扰
-    textInput.value = '';
-}
-
-function removeFile() {
-    fileInput.value = '';
-    uploadContent.style.display = '';
-    fileInfoDiv.style.display = 'none';
-    // 恢复默认名单
-    if (!textInput.value.trim()) {
-        textInput.value = DEFAULT_COMPANIES;
-    }
-}
-
-uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.style.borderColor = 'var(--accent)';
-    uploadArea.style.background = 'rgba(79, 195, 247, 0.08)';
 });
 
-uploadArea.addEventListener('dragleave', () => {
-    uploadArea.style.borderColor = '';
-    uploadArea.style.background = '';
-});
-
-uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.style.borderColor = '';
-    uploadArea.style.background = '';
-    const file = e.dataTransfer.files[0];
-    if (file) {
-        fileInput.files = e.dataTransfer.files;
-        showFileInfo(file);
-    }
-});
-
-fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) showFileInfo(file);
-});
-fileRemoveBtn.addEventListener('click', removeFile);
-startYearEl.addEventListener('change', validateYearRange);
-endYearEl.addEventListener('change', validateYearRange);
-
-const annualModule = createTaskModule({
-    formId: 'annualForm',
-    submitBtnId: 'annualSubmitBtn',
-    apiUrl: '/api/fetch',
-    buildFormData: () => {
-        const startYear = parseInt(startYearEl.value);
-        const endYear = parseInt(endYearEl.value);
-        const textVal = textInput.value.trim();
-        const file = fileInput.files[0];
-
-        if (!startYear || !endYear) {
-            alert('请选择年份范围');
-            return null;
-        }
-        if (!textVal && !file) {
-            alert('请输入企业名单或上传文件');
-            return null;
-        }
-
-        const formData = new FormData();
-        formData.append('start_year', startYear);
-        formData.append('end_year', endYear);
-        formData.append('text_input', textVal);
-        if (file) formData.append('file', file);
-        formData.append('industry_avg', industryAvgToggle.checked ? '1' : '0');
-        formData.append('merge_reports', mergeReportsToggle.checked ? '1' : '0');
-        // 年报模块不再传 amac_list
-        return formData;
-    },
-    resultId: 'annualResult',
-    progressId: 'annualProgress',
-    progressLabelId: 'annualProgressLabel',
-    progressPercentId: 'annualProgressPercent',
-    progressFillId: 'annualProgressFill',
-    progressMessageId: 'annualProgressMessage',
-    resultSectionId: 'annualResultSection',
-    resultStatusId: 'annualResultStatus',
-    fileListId: 'annualFileList',
-});
-
-// 年报重置按钮
-document.getElementById('annualResetBtn').addEventListener('click', () => {
-    document.getElementById('annualForm').reset();
-    textInput.value = DEFAULT_COMPANIES;
-    removeFile();
-    industryAvgToggle.checked = false;
-    mergeReportsToggle.checked = false;
-    document.getElementById('annualResult').style.display = 'none';
-    startYearEl.value = 2021;
-    endYearEl.value = 2025;
-});
-
-// ==================== 模块2: 金融机构名录 ====================
-
-const instCheckboxes = document.querySelectorAll('.inst-checkbox');
-const institutionSubmitBtn = document.getElementById('institutionSubmitBtn');
-
-function updateInstitutionSubmitBtn() {
-    const anyChecked = Array.from(instCheckboxes).some(cb => cb.checked);
-    institutionSubmitBtn.disabled = !anyChecked;
-    if (!anyChecked) {
-        institutionSubmitBtn.style.opacity = '0.5';
-        institutionSubmitBtn.style.cursor = 'not-allowed';
-    } else {
-        institutionSubmitBtn.style.opacity = '1';
-        institutionSubmitBtn.style.cursor = 'pointer';
-    }
-}
-
-instCheckboxes.forEach(cb => {
-    cb.addEventListener('change', updateInstitutionSubmitBtn);
-});
-
-const institutionModule = createTaskModule({
-    formId: 'institutionForm',
-    submitBtnId: 'institutionSubmitBtn',
-    apiUrl: '/api/institutions',
-    buildFormData: () => null,  // 由下方自定义提交逻辑处理（JSON body）
-    resultId: 'institutionResult',
-    progressId: 'institutionProgress',
-    progressLabelId: 'institutionProgressLabel',
-    progressPercentId: 'institutionProgressPercent',
-    progressFillId: 'institutionProgressFill',
-    progressMessageId: 'institutionProgressMessage',
-    resultSectionId: 'institutionResultSection',
-    resultStatusId: 'institutionResultStatus',
-    fileListId: 'institutionFileList',
-    // 覆盖默认提交逻辑，使用JSON body
-    onBeforeSubmit: null,
-});
-
-// 覆盖名录表单的提交逻辑（使用JSON body而非FormData）
-(function() {
-    const form = document.getElementById('institutionForm');
-    const origHandler = form.onsubmit;
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const types = [];
-        if (document.getElementById('instAmac').checked) types.push('amac');
-        if (document.getElementById('instBankIns').checked) types.push('bank_insurance');
-        if (document.getElementById('instSecFund').checked) types.push('securities_fund');
-
-        if (types.length === 0) {
-            alert('请至少勾选一种名录');
-            return;
-        }
-
-        institutionModule.setDisabled(true);
-        institutionModule.showResult();
-
-        try {
-            const resp = await fetch('/api/institutions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ types: types }),
-            });
-            const data = await resp.json();
-
-            if (!data.success) {
-                institutionModule.showError(data.error || '请求失败');
-                institutionModule.setDisabled(false);
-                return;
-            }
-
-            institutionModule.pollProgress(data.task_id);
-        } catch (err) {
-            institutionModule.showError('网络错误: ' + err.message);
-            institutionModule.setDisabled(false);
-        }
-    });
-})();
-
-// 初始化按钮状态
-updateInstitutionSubmitBtn();
-
-// ==================== 模块3: 深交所日度概况 ====================
-
-const szseYearEl = document.getElementById('szseYear');
-
-function initSzseYearSelector() {
-    const currentYear = new Date().getFullYear();
-    for (let y = currentYear; y >= 2000; y--) {
-        const opt = document.createElement('option');
-        opt.value = y;
-        opt.textContent = y + '年';
-        szseYearEl.appendChild(opt);
-    }
-    szseYearEl.value = currentYear;
-}
-
-const szseModule = createTaskModule({
-    formId: 'szseForm',
-    submitBtnId: 'szseSubmitBtn',
-    apiUrl: '/api/szse',
-    buildFormData: () => {
-        const formData = new FormData();
-        formData.append('year', szseYearEl.value);
-        return formData;
-    },
-    resultId: 'szseResult',
-    progressId: 'szseProgress',
-    progressLabelId: 'szseProgressLabel',
-    progressPercentId: 'szseProgressPercent',
-    progressFillId: 'szseProgressFill',
-    progressMessageId: 'szseProgressMessage',
-    resultSectionId: 'szseResultSection',
-    resultStatusId: 'szseResultStatus',
-    fileListId: 'szseFileList',
-});
-
-// ==================== 模块4: 分红公告查询 ====================
-
-const dividendStartYearEl = document.getElementById('dividendStartYear');
-const dividendEndYearEl = document.getElementById('dividendEndYear');
-const dividendTextInput = document.getElementById('dividendTextInput');
-const dividendFileInput = document.getElementById('dividendFileInput');
-const dividendUploadArea = document.getElementById('dividendUploadArea');
-const dividendFileInfo = document.getElementById('dividendFileInfo');
-const dividendFileName = document.getElementById('dividendFileName');
-const dividendFileRemove = document.getElementById('dividendFileRemove');
-const dividendUploadContent = document.querySelector('#dividendUploadArea .upload-content');
-
-function initDividendYearSelectors() {
-    const currentYear = new Date().getFullYear();
-    const startYear = 2000;
-
-    for (let y = currentYear; y >= startYear; y--) {
-        const opt1 = document.createElement('option');
-        opt1.value = y;
-        opt1.textContent = y + '年';
-        dividendStartYearEl.appendChild(opt1);
-
-        const opt2 = document.createElement('option');
-        opt2.value = y;
-        opt2.textContent = y + '年';
-        dividendEndYearEl.appendChild(opt2);
-    }
-
-    dividendStartYearEl.value = 2024;
-    dividendEndYearEl.value = 2025;
-}
-
-function validateDividendYearRange() {
-    const start = parseInt(dividendStartYearEl.value);
-    const end = parseInt(dividendEndYearEl.value);
-    if (start && end && start > end) {
-        [dividendStartYearEl.value, dividendEndYearEl.value] = [dividendEndYearEl.value, dividendStartYearEl.value];
-    }
-}
-
-// 分红文件上传处理
-function showDividendFileInfo(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (!['txt', 'csv'].includes(ext)) {
-        alert('仅支持 .txt 和 .csv 文件');
-        dividendFileInput.value = '';
-        return;
-    }
-    dividendUploadContent.style.display = 'none';
-    dividendFileInfo.style.display = 'flex';
-    dividendFileName.textContent = file.name;
-}
-
-function removeDividendFile() {
-    dividendFileInput.value = '';
-    dividendUploadContent.style.display = '';
-    dividendFileInfo.style.display = 'none';
-}
-
-dividendUploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dividendUploadArea.style.borderColor = 'var(--dividend-accent, #AB47BC)';
-    dividendUploadArea.style.background = 'rgba(171, 71, 188, 0.08)';
-});
-
-dividendUploadArea.addEventListener('dragleave', () => {
-    dividendUploadArea.style.borderColor = '';
-    dividendUploadArea.style.background = '';
-});
-
-dividendUploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dividendUploadArea.style.borderColor = '';
-    dividendUploadArea.style.background = '';
-    const file = e.dataTransfer.files[0];
-    if (file) {
-        dividendFileInput.files = e.dataTransfer.files;
-        showDividendFileInfo(file);
-    }
-});
-
-dividendFileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) showDividendFileInfo(file);
-});
-dividendFileRemove.addEventListener('click', removeDividendFile);
-dividendStartYearEl.addEventListener('change', validateDividendYearRange);
-dividendEndYearEl.addEventListener('change', validateDividendYearRange);
-
-const dividendModule = createTaskModule({
-    formId: 'dividendForm',
-    submitBtnId: 'dividendSubmitBtn',
-    apiUrl: '/api/dividend',
-    buildFormData: () => {
-        const startYear = parseInt(dividendStartYearEl.value);
-        const endYear = parseInt(dividendEndYearEl.value);
-        const textVal = dividendTextInput.value.trim();
-        const file = dividendFileInput.files[0];
-
-        if (!startYear || !endYear) {
-            alert('请选择年度范围');
-            return null;
-        }
-        if (!textVal && !file) {
-            alert('请输入企业名单或上传文件');
-            return null;
-        }
-
-        const formData = new FormData();
-        formData.append('start_year', startYear);
-        formData.append('end_year', endYear);
-        formData.append('text_input', textVal);
-        if (file) formData.append('file', file);
-        return formData;
-    },
-    resultId: 'dividendResult',
-    progressId: 'dividendProgress',
-    progressLabelId: 'dividendProgressLabel',
-    progressPercentId: 'dividendProgressPercent',
-    progressFillId: 'dividendProgressFill',
-    progressMessageId: 'dividendProgressMessage',
-    resultSectionId: 'dividendResultSection',
-    resultStatusId: 'dividendResultStatus',
-    fileListId: 'dividendFileList',
-});
-
-// ==================== 工具函数 ====================
+// ==================== 通用任务提交 ====================
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -610,63 +142,285 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// ==================== 模块5: 监管处罚信息 ====================
+function setBtnLoading(btn, loading) {
+    btn.disabled = loading;
+    if (loading) {
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><circle cx="12" cy="12" r="10" stroke-opacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/></svg>处理中...`;
+    } else {
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>开始获取`;
+    }
+}
 
-const penaltyModule = createTaskModule({
-    formId: 'penaltyForm',
-    submitBtnId: 'penaltySubmitBtn',
-    apiUrl: '/api/penalty',
-    buildFormData: () => null,  // 由下方自定义提交逻辑处理（JSON body）
-    resultId: 'penaltyResult',
-    progressId: 'penaltyProgress',
-    progressLabelId: 'penaltyProgressLabel',
-    progressPercentId: 'penaltyProgressPercent',
-    progressFillId: 'penaltyProgressFill',
-    progressMessageId: 'penaltyProgressMessage',
-    resultSectionId: 'penaltyResultSection',
-    resultStatusId: 'penaltyResultStatus',
-    fileListId: 'penaltyFileList',
-});
-
-// 覆盖处罚表单提交逻辑（使用JSON body）
-(function() {
-    const form = document.getElementById('penaltyForm');
-    form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        penaltyModule.setDisabled(true);
-        penaltyModule.showResult();
-
+function pollTask(taskId, label, btn) {
+    const timer = setInterval(async () => {
         try {
-            const resp = await fetch('/api/penalty', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
-            });
+            const resp = await fetch('/api/progress/' + taskId);
             const data = await resp.json();
-
             if (!data.success) {
-                penaltyModule.showError(data.error || '请求失败');
-                penaltyModule.setDisabled(false);
+                clearInterval(timer);
+                resultsPanel.setError(taskId, data.error || '查询失败');
+                setBtnLoading(btn, false);
                 return;
             }
-
-            penaltyModule.pollProgress(data.task_id);
+            const task = data.task;
+            resultsPanel.updateProgress(taskId, task);
+            if (task.status === 'done') {
+                clearInterval(timer);
+                resultsPanel.setDone(taskId, task);
+                setBtnLoading(btn, false);
+            } else if (task.status === 'error') {
+                clearInterval(timer);
+                resultsPanel.setError(taskId, task.error || '处理失败');
+                setBtnLoading(btn, false);
+            }
         } catch (err) {
-            penaltyModule.showError('网络错误: ' + err.message);
-            penaltyModule.setDisabled(false);
+            clearInterval(timer);
+            resultsPanel.setError(taskId, '网络错误: ' + err.message);
+            setBtnLoading(btn, false);
         }
-    });
-})();
+    }, POLL_INTERVAL);
+}
+
+async function submitFormData(apiUrl, formData, label, btn) {
+    setBtnLoading(btn, true);
+    try {
+        const resp = await fetch(apiUrl, { method: 'POST', body: formData });
+        const data = await resp.json();
+        if (!data.success) {
+            resultsPanel.createCard('err-' + Date.now(), label);
+            resultsPanel.setError('err-' + Date.now(), data.error || '请求失败');
+            setBtnLoading(btn, false);
+            return;
+        }
+        resultsPanel.createCard(data.task_id, label);
+        pollTask(data.task_id, label, btn);
+    } catch (err) {
+        resultsPanel.createCard('err-' + Date.now(), label);
+        resultsPanel.setError('err-' + Date.now(), '网络错误: ' + err.message);
+        setBtnLoading(btn, false);
+    }
+}
+
+async function submitJson(apiUrl, body, label, btn) {
+    setBtnLoading(btn, true);
+    try {
+        const resp = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            resultsPanel.createCard('err-' + Date.now(), label);
+            resultsPanel.setError('err-' + Date.now(), data.error || '请求失败');
+            setBtnLoading(btn, false);
+            return;
+        }
+        resultsPanel.createCard(data.task_id, label);
+        pollTask(data.task_id, label, btn);
+    } catch (err) {
+        resultsPanel.createCard('err-' + Date.now(), label);
+        resultsPanel.setError('err-' + Date.now(), '网络错误: ' + err.message);
+        setBtnLoading(btn, false);
+    }
+}
+
+// ==================== 模块1: 年报数据 ====================
+
+const startYearEl = document.getElementById('startYear');
+const endYearEl = document.getElementById('endYear');
+const textInput = document.getElementById('textInput');
+const fileInput = document.getElementById('fileInput');
+const uploadArea = document.getElementById('uploadArea');
+const uploadPlaceholder = document.getElementById('uploadPlaceholder');
+const fileInfo = document.getElementById('fileInfo');
+const fileNameSpan = document.getElementById('fileName');
+const fileRemoveBtn = document.getElementById('fileRemove');
+const industryAvgToggle = document.getElementById('industryAvgToggle');
+const mergeReportsToggle = document.getElementById('mergeReportsToggle');
+
+function initYearSelectors() {
+    const cy = new Date().getFullYear();
+    for (let y = cy; y >= 1990; y--) {
+        const o1 = document.createElement('option'); o1.value = y; o1.textContent = y + '年'; startYearEl.appendChild(o1);
+        const o2 = document.createElement('option'); o2.value = y; o2.textContent = y + '年'; endYearEl.appendChild(o2);
+    }
+    startYearEl.value = 2021; endYearEl.value = 2025;
+}
+
+function validateYearRange() {
+    const s = parseInt(startYearEl.value), e = parseInt(endYearEl.value);
+    if (s && e && s > e) { [startYearEl.value, endYearEl.value] = [endYearEl.value, startYearEl.value]; }
+}
+
+function showAnnualFile(file) {
+    if (!['txt','csv'].includes(file.name.split('.').pop().toLowerCase())) {
+        alert('仅支持 .txt 和 .csv 文件'); fileInput.value = ''; return;
+    }
+    uploadPlaceholder.style.display = 'none';
+    fileInfo.style.display = 'flex';
+    fileNameSpan.textContent = file.name;
+    textInput.value = '';
+}
+
+function removeAnnualFile() {
+    fileInput.value = '';
+    uploadPlaceholder.style.display = '';
+    fileInfo.style.display = 'none';
+    if (!textInput.value.trim()) textInput.value = DEFAULT_COMPANIES;
+}
+
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.style.borderColor = 'var(--accent)'; });
+uploadArea.addEventListener('dragleave', () => { uploadArea.style.borderColor = ''; });
+uploadArea.addEventListener('drop', e => {
+    e.preventDefault(); uploadArea.style.borderColor = '';
+    const f = e.dataTransfer.files[0];
+    if (f) { fileInput.files = e.dataTransfer.files; showAnnualFile(f); }
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) showAnnualFile(e.target.files[0]); });
+fileRemoveBtn.addEventListener('click', removeAnnualFile);
+startYearEl.addEventListener('change', validateYearRange);
+endYearEl.addEventListener('change', validateYearRange);
+
+document.getElementById('annualForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const s = parseInt(startYearEl.value), e2 = parseInt(endYearEl.value);
+    const text = textInput.value.trim(), file = fileInput.files[0];
+    if (!s || !e2) return alert('请选择年份范围');
+    if (!text && !file) return alert('请输入企业名单或上传文件');
+
+    const fd = new FormData();
+    fd.append('start_year', s); fd.append('end_year', e2);
+    fd.append('text_input', text);
+    if (file) fd.append('file', file);
+    fd.append('industry_avg', industryAvgToggle.checked ? '1' : '0');
+    fd.append('merge_reports', mergeReportsToggle.checked ? '1' : '0');
+    await submitFormData('/api/fetch', fd, '年报数据', document.getElementById('annualSubmitBtn'));
+});
+
+document.getElementById('annualResetBtn').addEventListener('click', () => {
+    document.getElementById('annualForm').reset();
+    textInput.value = DEFAULT_COMPANIES;
+    removeAnnualFile();
+    industryAvgToggle.checked = false;
+    mergeReportsToggle.checked = false;
+    startYearEl.value = 2021; endYearEl.value = 2025;
+});
+
+// ==================== 模块2: 机构名录 ====================
+
+const instCheckboxes = document.querySelectorAll('.inst-checkbox');
+const instBtn = document.getElementById('institutionSubmitBtn');
+
+function updateInstBtn() {
+    const any = Array.from(instCheckboxes).some(cb => cb.checked);
+    instBtn.disabled = !any;
+    instBtn.style.opacity = any ? '1' : '0.5';
+}
+instCheckboxes.forEach(cb => cb.addEventListener('change', updateInstBtn));
+
+document.getElementById('institutionForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const types = [];
+    if (document.getElementById('instAmac').checked) types.push('amac');
+    if (document.getElementById('instBankIns').checked) types.push('bank_insurance');
+    if (document.getElementById('instSecFund').checked) types.push('securities_fund');
+    if (!types.length) return alert('请至少勾选一种名录');
+    await submitJson('/api/institutions', { types }, '机构名录', instBtn);
+});
+updateInstBtn();
+
+// ==================== 模块3: 深交所概况 ====================
+
+const szseYearEl = document.getElementById('szseYear');
+function initSzseYear() {
+    const cy = new Date().getFullYear();
+    for (let y = cy; y >= 2000; y--) {
+        const o = document.createElement('option'); o.value = y; o.textContent = y + '年'; szseYearEl.appendChild(o);
+    }
+    szseYearEl.value = cy;
+}
+document.getElementById('szseForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(); fd.append('year', szseYearEl.value);
+    await submitFormData('/api/szse', fd, '深交所概况', document.getElementById('szseSubmitBtn'));
+});
+
+// ==================== 模块4: 分红查询 ====================
+
+const dividendStartYearEl = document.getElementById('dividendStartYear');
+const dividendEndYearEl = document.getElementById('dividendEndYear');
+const dividendTextInput = document.getElementById('dividendTextInput');
+const dividendFileInput = document.getElementById('dividendFileInput');
+const dividendUploadArea = document.getElementById('dividendUploadArea');
+const dividendUploadPlaceholder = document.getElementById('dividendUploadPlaceholder');
+const dividendFileInfo = document.getElementById('dividendFileInfo');
+const dividendFileName = document.getElementById('dividendFileName');
+const dividendFileRemove = document.getElementById('dividendFileRemove');
+
+function initDividendYears() {
+    const cy = new Date().getFullYear();
+    for (let y = cy; y >= 2000; y--) {
+        const o1 = document.createElement('option'); o1.value = y; o1.textContent = y + '年'; dividendStartYearEl.appendChild(o1);
+        const o2 = document.createElement('option'); o2.value = y; o2.textContent = y + '年'; dividendEndYearEl.appendChild(o2);
+    }
+    dividendStartYearEl.value = 2024; dividendEndYearEl.value = 2025;
+}
+
+function validateDividendYears() {
+    const s = parseInt(dividendStartYearEl.value), e = parseInt(dividendEndYearEl.value);
+    if (s && e && s > e) { [dividendStartYearEl.value, dividendEndYearEl.value] = [dividendEndYearEl.value, dividendStartYearEl.value]; }
+}
+
+function showDividendFile(file) {
+    if (!['txt','csv'].includes(file.name.split('.').pop().toLowerCase())) {
+        alert('仅支持 .txt 和 .csv 文件'); dividendFileInput.value = ''; return;
+    }
+    dividendUploadPlaceholder.style.display = 'none';
+    dividendFileInfo.style.display = 'flex';
+    dividendFileName.textContent = file.name;
+}
+
+function removeDividendFile() {
+    dividendFileInput.value = '';
+    dividendUploadPlaceholder.style.display = '';
+    dividendFileInfo.style.display = 'none';
+}
+
+dividendUploadArea.addEventListener('dragover', e => { e.preventDefault(); dividendUploadArea.style.borderColor = 'var(--accent)'; });
+dividendUploadArea.addEventListener('dragleave', () => { dividendUploadArea.style.borderColor = ''; });
+dividendUploadArea.addEventListener('drop', e => {
+    e.preventDefault(); dividendUploadArea.style.borderColor = '';
+    const f = e.dataTransfer.files[0];
+    if (f) { dividendFileInput.files = e.dataTransfer.files; showDividendFile(f); }
+});
+dividendFileInput.addEventListener('change', e => { if (e.target.files[0]) showDividendFile(e.target.files[0]); });
+dividendFileRemove.addEventListener('click', removeDividendFile);
+dividendStartYearEl.addEventListener('change', validateDividendYears);
+dividendEndYearEl.addEventListener('change', validateDividendYears);
+
+document.getElementById('dividendForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const s = parseInt(dividendStartYearEl.value), e2 = parseInt(dividendEndYearEl.value);
+    const text = dividendTextInput.value.trim(), file = dividendFileInput.files[0];
+    if (!s || !e2) return alert('请选择年度范围');
+    if (!text && !file) return alert('请输入企业名单或上传文件');
+
+    const fd = new FormData();
+    fd.append('start_year', s); fd.append('end_year', e2);
+    fd.append('text_input', text);
+    if (file) fd.append('file', file);
+    await submitFormData('/api/dividend', fd, '分红查询', document.getElementById('dividendSubmitBtn'));
+});
+
+// ==================== 模块5: 处罚信息 ====================
+
+document.getElementById('penaltyForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    await submitJson('/api/penalty', {}, '处罚信息', document.getElementById('penaltySubmitBtn'));
+});
 
 // ==================== 启动 ====================
 initYearSelectors();
-initSzseYearSelector();
-initDividendYearSelectors();
-
-// 旋转动画样式
-const spinStyle = document.createElement('style');
-spinStyle.textContent = `
-    .spinning { animation: spin 1s linear infinite; }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-`;
-document.head.appendChild(spinStyle);
+initSzseYear();
+initDividendYears();
