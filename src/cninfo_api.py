@@ -305,6 +305,157 @@ class CninfoAPI:
         logger.info(f"东方财富获取 {stock_code} {report_type}: {len(all_records)} 条")
         return all_records
 
+    # ==================== 备选数据源：新浪财经（免费，完整科目） ====================
+
+    @staticmethod
+    def _parse_sina_finance_html(html: str) -> List[Dict[str, Any]]:
+        """解析新浪财经财务报表 HTML 表格，返回记录列表
+
+        新浪财经表格结构：
+          Row 0: 空
+          Row 1: 表头（报表日期 | 2026-03-31 | 2025-12-31 | ...）
+          Row 2: 空
+          Row 3+: 数据行（科目名称 | val1 | val2 | ...）或分组标题行
+
+        返回格式（与 cninfo API 一致）:
+          [{"报告期": "2025-12-31", "货币资金": 123, ...}, ...]
+
+        注：新浪财经数值单位为千元，返回时乘以 1000 转换为元
+        """
+        import re
+
+        # 提取表格
+        table_match = re.search(
+            r'<table[^>]*id="[^"]*Table0"[^>]*>(.*?)</table>',
+            html, re.DOTALL | re.IGNORECASE,
+        )
+        if not table_match:
+            return []
+
+        table_html = table_match.group(1)
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL)
+        if len(rows) < 4:
+            return []
+
+        # 解析表头行，获取日期列
+        header_tds = re.findall(r'<td[^>]*>(.*?)</td>', rows[1], re.DOTALL)
+        dates = []
+        for td in header_tds[1:]:  # 跳过第一列"报表日期"
+            date_text = re.sub(r'<[^>]+>', '', td).strip()
+            dates.append(date_text)
+
+        if not dates:
+            return []
+
+        # 按日期分组收集科目数据
+        # records[date_index] = {科目: 值, "报告期": date}
+        records = []
+        for i, date in enumerate(dates):
+            records.append({"报告期": date})
+
+        for row in rows[2:]:
+            tds = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+            if len(tds) < 2:
+                continue
+
+            # 第一列是科目名称
+            subject = re.sub(r'<[^>]+>', '', tds[0]).strip()
+            if not subject:
+                continue
+
+            # 跳过纯分组标题行（如"流动资产"、"非流动负债"等）：后续列全部为空
+            has_data = any(
+                re.sub(r'<[^>]+>', '', td).strip()
+                for td in tds[1:]
+            )
+            if not has_data:
+                continue
+
+            # 解析各期数值
+            for i, td in enumerate(tds[1:]):
+                if i >= len(dates):
+                    break
+                val_text = re.sub(r'<[^>]+>', '', td).strip()
+                if val_text and val_text != '--':
+                    try:
+                        # 新浪财经单位是千元，转换为元
+                        val = float(val_text.replace(',', '')) * 1000
+                        records[i][subject] = val
+                    except (ValueError, TypeError):
+                        pass
+
+        return records
+
+    def fetch_from_sina(
+        self,
+        stock_code: str,
+        report_type: str,
+        start_year: int,
+        end_year: int,
+    ) -> List[Dict[str, Any]]:
+        """从新浪财经获取财务报表数据（免费，科目完整）
+
+        参数:
+            stock_code: 股票代码
+            report_type: 报表类型，"balance"/"income"/"cashflow"
+            start_year: 开始年份
+            end_year: 截止年份
+
+        返回:
+            财务报表数据列表，格式与 cninfo API 一致
+        """
+        url_map = {
+            "balance": "vFD_BalanceSheet",
+            "income": "vFD_ProfitStatement",
+            "cashflow": "vFD_CashFlow",
+        }
+        endpoint = url_map.get(report_type)
+        if not endpoint:
+            raise ValueError(f"不支持的报表类型: {report_type}")
+
+        url = (
+            f"https://money.finance.sina.com.cn/corp/go.php/"
+            f"{endpoint}/stockid/{stock_code}/ctrl/part/displaytype/4.phtml"
+        )
+
+        try:
+            resp = self.session.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                timeout=self.timeout,
+            )
+            if resp.status_code != 200:
+                logger.warning(f"新浪财经请求失败 {url}: HTTP {resp.status_code}")
+                return []
+
+            resp.encoding = "gbk"
+            html = resp.text
+
+            all_records = self._parse_sina_finance_html(html)
+
+            # 按年份过滤
+            filtered = []
+            for rec in all_records:
+                report_date = rec.get("报告期", "")
+                if not report_date:
+                    continue
+                try:
+                    year = int(report_date[:4])
+                except (ValueError, TypeError):
+                    continue
+                if start_year <= year <= end_year:
+                    filtered.append(rec)
+
+            logger.info(f"新浪财经获取 {stock_code} {report_type}: {len(filtered)} 条")
+            return filtered
+
+        except Exception as e:
+            logger.warning(f"新浪财经数据获取失败({stock_code} {report_type}): {e}")
+            return []
+
     # ==================== 分红数据 ====================
 
     def fetch_dividend_data(

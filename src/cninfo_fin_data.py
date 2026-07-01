@@ -574,16 +574,34 @@ class FinancialDataFetcher:
                         continue
                     except Exception as e:
                         logger.warning(
-                            f"cninfo API获取{cn_name}失败({e})，切换到免费数据源..."
+                            f"cninfo API获取{cn_name}失败({e})，切换到新浪财经..."
                         )
 
-                # 非上市公司没有东方财富数据，跳过回退
+                # 非上市公司没有免费数据源，跳过
                 if is_non_listed:
-                    logger.warning(f"非上市公司 {org_id} 无法回退到东方财富数据源")
+                    logger.warning(f"非上市公司 {org_id} 无法回退到免费数据源")
                     result[cn_name] = []
                     continue
 
-                # 回退到东方财富免费数据源（仅上市公司）
+                # 回退到新浪财经（免费，科目完整）
+                try:
+                    records = self.api.fetch_from_sina(
+                        stock_code, report_type, start_year, end_year
+                    )
+                    if records:
+                        # 新浪财经字段名已是中文，直接通过 _translate_fields 做数值转换
+                        translated = self._translate_fields(
+                            records, report_type, is_eastmoney=False
+                        )
+                        result[cn_name] = translated
+                        time.sleep(0.5)
+                        continue
+                except Exception as e:
+                    logger.warning(
+                        f"新浪财经获取{cn_name}失败({e})，切换到东方财富..."
+                    )
+
+                # 最后回退到东方财富免费数据源
                 records = self.api.fetch_from_eastmoney(
                     stock_code, report_type, start_year, end_year
                 )
