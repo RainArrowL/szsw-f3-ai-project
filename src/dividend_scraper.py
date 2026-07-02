@@ -151,30 +151,37 @@ def _lookup_hk_code(a_code: str) -> str:
     if a_code in _hk_code_cache:
         return _hk_code_cache[a_code]
 
-    try:
-        f10_url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
-        f10_params = {
-            "reportName": "RPT_F10_ORG_BASICINFO",
-            "columns": "STR_CODEH",
-            "pageNumber": 1,
-            "pageSize": 1,
-            "source": "WEB",
-            "client": "WEB",
-            "filter": f'(SECURITY_CODE="{a_code}")',
-        }
-        resp = requests.get(f10_url, params=f10_params, headers=HEADERS, timeout=15)
-        f10_data = resp.json()
-        if f10_data.get("success") and f10_data.get("result") and f10_data["result"].get("data"):
-            str_codeh = f10_data["result"]["data"][0].get("STR_CODEH", "")
-            if str_codeh:
-                # "02318.HK" → "02318"
-                hk_code = str_codeh.split(".")[0].strip()
-                if hk_code.isdigit():
-                    _hk_code_cache[a_code] = hk_code
-                    logger.info(f"  {a_code} → H股 {hk_code}")
-                    return hk_code
-    except Exception as e:
-        logger.debug(f"查找 {a_code} H股代码失败: {e}")
+    # 带重试的F10 API请求
+    for attempt in range(3):
+        try:
+            f10_url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+            f10_params = {
+                "reportName": "RPT_F10_ORG_BASICINFO",
+                "columns": "STR_CODEH",
+                "pageNumber": 1,
+                "pageSize": 1,
+                "source": "WEB",
+                "client": "WEB",
+                "filter": f'(SECURITY_CODE="{a_code}")',
+            }
+            resp = requests.get(f10_url, params=f10_params, headers=HEADERS, timeout=15)
+            f10_data = resp.json()
+            if f10_data.get("success") and f10_data.get("result") and f10_data["result"].get("data"):
+                str_codeh = f10_data["result"]["data"][0].get("STR_CODEH", "")
+                if str_codeh:
+                    hk_code = str_codeh.split(".")[0].strip()
+                    if hk_code.isdigit():
+                        _hk_code_cache[a_code] = hk_code
+                        logger.info(f"  {a_code} → H股 {hk_code}")
+                        return hk_code
+            # 成功但无数据，无需重试
+            break
+        except Exception as e:
+            if attempt < 2:
+                time.sleep((attempt + 1) * 0.5)
+                logger.debug(f"查找 {a_code} H股代码失败 (重试 {attempt + 1}): {e}")
+            else:
+                logger.debug(f"查找 {a_code} H股代码失败: {e}")
 
     _hk_code_cache[a_code] = ""
     return ""
@@ -213,6 +220,12 @@ def _get_ah_share_counts(code: str) -> Optional[Tuple[int, int]]:
             resp = requests.get(quote_url, params=params, headers=HEADERS, timeout=15)
             data = resp.json()
             if not data.get("data"):
+                # 空响应可能是限流，重试
+                if attempt < max_retries - 1:
+                    wait = (attempt + 1) * 1.5
+                    logger.debug(f"获取 {code} AH股本空响应 (重试 {attempt + 1}/{max_retries})")
+                    time.sleep(wait)
+                    continue
                 _share_count_cache[code] = None
                 return None
 
@@ -335,9 +348,12 @@ def _fetch_single_stock(code: str, start_year: int, end_year: int) -> List[Dict]
             notice_date = _normalize_date(em_row.get("最新公告日期", ""))
 
         # === 合并同花顺数据 ===
+        # 纯A股公司字段名为"分红总额"，AH股公司为"AH分红总额"
         ths_row = ths_map.get(report_period)
         if ths_row is not None:
-            total_amount = _parse_amount(ths_row.get("分红总额", ""))
+            total_amount = _parse_amount(
+                ths_row.get("AH分红总额", ths_row.get("分红总额", ""))
+            )
         else:
             total_amount = 0.0
 
@@ -546,21 +562,33 @@ def fetch_dividend_data(
     if progress_callback:
         progress_callback(0, 0, "正在计算A股/H股分配金额...")
 
-    time.sleep(0.5)  # 避免东方财富API频率限制
+    time.sleep(1.0)  # 避免东方财富API频率限制（Stage 2刚调用了push2）
+
+    # 先按股票代码去重，每只股票只查一次AH股本
+    unique_codes = list(set(r["SECURITY_CODE"] for r in all_records))
+    ah_cache: Dict[str, Optional[Tuple[int, int]]] = {}
+    for code in unique_codes:
+        ah_cache[code] = _get_ah_share_counts(code)
+        time.sleep(0.5)  # 每只股票间隔，避免限流
 
     for record in all_records:
         code = record["SECURITY_CODE"]
-        per_share = record["CASH_DIVIDEND_PER_SHARE"]
-        total_shares = record.get("TOTAL_SHARES", 0)
+        total_amount = record["TOTAL_AMOUNT"]
 
-        ah_counts = _get_ah_share_counts(code)
+        ah_counts = ah_cache.get(code)
         if ah_counts:
             a_shares, h_shares = ah_counts
-            record["A_SHARE_AMOUNT"] = round(per_share * a_shares, 2)
-            record["H_SHARE_AMOUNT"] = round(per_share * h_shares, 2)
+            total_shares = a_shares + h_shares
+            if total_shares > 0 and total_amount > 0:
+                # 按股本比例从同花顺AH分红总额拆分
+                record["A_SHARE_AMOUNT"] = round(total_amount * a_shares / total_shares, 2)
+                record["H_SHARE_AMOUNT"] = round(total_amount * h_shares / total_shares, 2)
+            else:
+                record["A_SHARE_AMOUNT"] = total_amount
+                record["H_SHARE_AMOUNT"] = 0
         else:
-            # 纯A股公司：A股分配金额 = 总分配金额，H股分配金额 = 0
-            record["A_SHARE_AMOUNT"] = record["TOTAL_AMOUNT"]
+            # 纯A股公司：同花顺"分红总额"就是A股分配金额
+            record["A_SHARE_AMOUNT"] = total_amount
             record["H_SHARE_AMOUNT"] = 0
 
     # ===== 阶段4: 获取H股红利派发日期 =====
