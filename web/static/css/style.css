@@ -341,7 +341,7 @@ textarea::placeholder { color: var(--text-secondary); opacity: 0.4; }
 
 /* 文件列表 */
 .task-files {
-    padding: 0 16px 12px;
+    padding: 10px 16px 12px;
     display: flex; flex-direction: column; gap: 6px;
 }
 .file-row {
