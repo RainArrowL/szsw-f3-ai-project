@@ -84,7 +84,29 @@ const resultsPanel = {
             const filesDiv = document.createElement('div');
             filesDiv.className = 'task-files';
 
-            // 2个及以上文件时添加一键下载按钮
+            // 先构建文件列表HTML并设置（此时filesDiv为空，不会影响事件）
+            let filesHtml = '';
+            task.files.forEach(f => {
+                const size = f.size ? (f.size >= 1048576 ? (f.size / 1048576).toFixed(2) + ' MB' : (f.size / 1024).toFixed(0) + ' KB') : '';
+                filesHtml += `
+                    <div class="file-row">
+                        <div class="file-row-info">
+                            <div class="file-row-name">${escapeHtml(f.display_name || f.name)}</div>
+                            <div class="file-row-size">${size}</div>
+                        </div>
+                        <a class="file-row-dl" href="/download/${encodeURIComponent(f.name)}" download>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            下载
+                        </a>
+                    </div>`;
+            });
+            filesDiv.innerHTML = filesHtml;
+
+            // 2个及以上文件时添加一键下载按钮（在innerHTML设置之后appendChild，避免事件丢失）
             if (task.files.length >= 2) {
                 const filenames = task.files.map(f => f.name);
                 const taskLabel = card.dataset.label || '批量下载';
@@ -101,27 +123,10 @@ const resultsPanel = {
                     一键下载全部 (${task.files.length}个文件)`;
                 btn.addEventListener('click', () => downloadAllFiles(btn, filenames, taskLabel));
                 btnRow.appendChild(btn);
-                filesDiv.appendChild(btnRow);
+                // 插入到文件列表最前面
+                filesDiv.insertBefore(btnRow, filesDiv.firstChild);
             }
 
-            task.files.forEach(f => {
-                const size = f.size ? (f.size >= 1048576 ? (f.size / 1048576).toFixed(2) + ' MB' : (f.size / 1024).toFixed(0) + ' KB') : '';
-                filesDiv.innerHTML += `
-                    <div class="file-row">
-                        <div class="file-row-info">
-                            <div class="file-row-name">${escapeHtml(f.display_name || f.name)}</div>
-                            <div class="file-row-size">${size}</div>
-                        </div>
-                        <a class="file-row-dl" href="/download/${encodeURIComponent(f.name)}" download>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7 10 12 15 17 10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            下载
-                        </a>
-                    </div>`;
-            });
             card.appendChild(filesDiv);
         }
     },
