@@ -361,6 +361,47 @@ textarea::placeholder { color: var(--text-secondary); opacity: 0.4; }
     padding: 14px 20px 16px;
     display: flex; flex-direction: column; gap: 8px;
 }
+
+/* 一键下载按钮 */
+.task-download-all-row {
+    margin-bottom: 4px;
+}
+
+.btn-download-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, var(--accent), #7c3aed);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: var(--font-md);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    justify-content: center;
+}
+
+.btn-download-all:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+}
+
+.btn-download-all:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.btn-download-all svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
 .file-row {
     display: flex; align-items: center; justify-content: space-between;
     gap: 14px; padding: 12px 16px;

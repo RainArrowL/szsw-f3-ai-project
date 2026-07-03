@@ -10,6 +10,8 @@ import sys
 import re
 import uuid
 import time
+import io
+import zipfile
 import logging
 import threading
 from pathlib import Path
@@ -21,7 +23,7 @@ from datetime import datetime
 from functools import wraps
 from typing import Dict, List, Optional, Tuple
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, send_from_directory, abort
+from flask import Flask, render_template, request, jsonify, send_from_directory, send_file, abort
 
 from config import config
 from cninfo_fin_data import FinancialDataFetcher, resolve_companies
@@ -388,6 +390,39 @@ def download_file(filename):
         filename,
         as_attachment=True,
         download_name=filename
+    )
+
+
+@app.route('/api/download_all', methods=['POST'])
+def download_all():
+    """批量下载多个文件（打包为zip）"""
+    data = request.get_json()
+    if not data or not data.get('files'):
+        return jsonify({'success': False, 'error': '未提供文件列表'}), 400
+
+    filenames = data['files']
+    output_dir = config.output_dir.resolve()
+
+    # 创建内存中的zip文件
+    zip_buffer = io.BytesIO()
+    added = 0
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for fn in filenames:
+            fn = Path(fn).name  # 安全检查
+            full_path = output_dir / fn
+            if full_path.exists():
+                zf.write(full_path, fn)
+                added += 1
+
+    if added == 0:
+        return jsonify({'success': False, 'error': '所有文件均不存在'}), 404
+
+    zip_buffer.seek(0)
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'批量下载_{added}个文件_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
     )
 
 
