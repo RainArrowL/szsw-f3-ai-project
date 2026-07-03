@@ -90,15 +90,17 @@ const resultsPanel = {
                 const taskLabel = card.dataset.label || '批量下载';
                 const btnRow = document.createElement('div');
                 btnRow.className = 'task-download-all-row';
-                btnRow.innerHTML = `
-                    <button class="btn-download-all" onclick="downloadAllFiles(this, ${JSON.stringify(filenames).replace(/"/g, '&quot;')}, '${taskLabel}')">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="7 10 12 15 17 10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        一键下载全部 (${task.files.length}个文件)
-                    </button>`;
+                const btn = document.createElement('button');
+                btn.className = 'btn-download-all';
+                btn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    一键下载全部 (${task.files.length}个文件)`;
+                btn.addEventListener('click', () => downloadAllFiles(btn, filenames, taskLabel));
+                btnRow.appendChild(btn);
                 filesDiv.appendChild(btnRow);
             }
 
@@ -173,7 +175,7 @@ async function downloadAllFiles(btn, filenames, label) {
             body: JSON.stringify({ files: filenames, label: label }),
         });
         if (!resp.ok) {
-            const data = await resp.json();
+            const data = await resp.json().catch(() => ({}));
             alert('下载失败: ' + (data.error || '未知错误'));
             btn.innerHTML = origText;
             btn.disabled = false;
@@ -181,15 +183,12 @@ async function downloadAllFiles(btn, filenames, label) {
         }
         const blob = await resp.blob();
         const url = window.URL.createObjectURL(blob);
-        // 从响应头获取文件名
-        const disposition = resp.headers.get('Content-Disposition');
-        let downloadName = label + '_批量下载.zip';
-        if (disposition) {
-            const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-            if (match) {
-                downloadName = decodeURIComponent(match[1]);
-            }
-        }
+        // 前端直接构造文件名：功能名_年月日.zip
+        const today = new Date();
+        const dateStr = today.getFullYear() +
+            String(today.getMonth() + 1).padStart(2, '0') +
+            String(today.getDate()).padStart(2, '0');
+        const downloadName = (label || '批量下载') + '_' + dateStr + '.zip';
         const a = document.createElement('a');
         a.href = url;
         a.download = downloadName;

@@ -422,7 +422,7 @@ def download_all():
         return jsonify({'success': False, 'error': '所有文件均不存在'}), 404
 
     zip_buffer.seek(0)
-    zip_name = f"{safe_label}_{added}个文件_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    zip_name = f"{safe_label}_{datetime.now().strftime('%Y%m%d')}.zip"
     return send_file(
         zip_buffer,
         mimetype='application/zip',
