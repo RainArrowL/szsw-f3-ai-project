@@ -32,6 +32,7 @@ const resultsPanel = {
         const card = document.createElement('div');
         card.className = 'task-card';
         card.id = 'task-' + taskId;
+        card.dataset.label = label;
         card.innerHTML = `
             <div class="task-card-header">
                 <div class="task-card-title">
@@ -86,10 +87,11 @@ const resultsPanel = {
             // 2个及以上文件时添加一键下载按钮
             if (task.files.length >= 2) {
                 const filenames = task.files.map(f => f.name);
+                const taskLabel = card.dataset.label || '批量下载';
                 const btnRow = document.createElement('div');
                 btnRow.className = 'task-download-all-row';
                 btnRow.innerHTML = `
-                    <button class="btn-download-all" onclick="downloadAllFiles(this, ${JSON.stringify(filenames).replace(/"/g, '&quot;')})">
+                    <button class="btn-download-all" onclick="downloadAllFiles(this, ${JSON.stringify(filenames).replace(/"/g, '&quot;')}, '${taskLabel}')">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                             <polyline points="7 10 12 15 17 10"/>
@@ -160,7 +162,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-async function downloadAllFiles(btn, filenames) {
+async function downloadAllFiles(btn, filenames, label) {
     const origText = btn.innerHTML;
     btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><circle cx="12" cy="12" r="10" stroke-opacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10" stroke-linecap="round"/></svg>打包中...';
     btn.disabled = true;
@@ -168,7 +170,7 @@ async function downloadAllFiles(btn, filenames) {
         const resp = await fetch('/api/download_all', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ files: filenames }),
+            body: JSON.stringify({ files: filenames, label: label }),
         });
         if (!resp.ok) {
             const data = await resp.json();
@@ -179,9 +181,18 @@ async function downloadAllFiles(btn, filenames) {
         }
         const blob = await resp.blob();
         const url = window.URL.createObjectURL(blob);
+        // 从响应头获取文件名
+        const disposition = resp.headers.get('Content-Disposition');
+        let downloadName = label + '_批量下载.zip';
+        if (disposition) {
+            const match = disposition.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+            if (match) {
+                downloadName = decodeURIComponent(match[1]);
+            }
+        }
         const a = document.createElement('a');
         a.href = url;
-        a.download = '批量下载_' + filenames.length + '个文件.zip';
+        a.download = downloadName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

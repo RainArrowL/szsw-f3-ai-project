@@ -401,7 +401,11 @@ def download_all():
         return jsonify({'success': False, 'error': '未提供文件列表'}), 400
 
     filenames = data['files']
+    label = data.get('label', '批量下载')
     output_dir = config.output_dir.resolve()
+
+    # 清理label中的非法字符
+    safe_label = re.sub(r'[\\/:*?"<>|]', '_', str(label))
 
     # 创建内存中的zip文件
     zip_buffer = io.BytesIO()
@@ -418,11 +422,12 @@ def download_all():
         return jsonify({'success': False, 'error': '所有文件均不存在'}), 404
 
     zip_buffer.seek(0)
+    zip_name = f"{safe_label}_{added}个文件_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
     return send_file(
         zip_buffer,
         mimetype='application/zip',
         as_attachment=True,
-        download_name=f'批量下载_{added}个文件_{datetime.now().strftime("%Y%m%d_%H%M%S")}.zip'
+        download_name=zip_name
     )
 
 
