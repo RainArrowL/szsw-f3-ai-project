@@ -34,6 +34,7 @@ from penalty_scraper import fetch_all_penalty, write_penalty_excel
 from institution_scraper import fetch_all_institution_lists, write_institution_excel, download_nfra_pdfs, download_csrc_to_combined_xlsx
 from szse_scraper import fetch_year_data, write_szse_excel, write_szse_weekly_summary
 from dividend_scraper import fetch_dividend_data, write_dividend_excel
+from stat_scraper import download_all_stats
 
 # 日志配置
 logging.basicConfig(
@@ -565,66 +566,90 @@ def fetch_institutions():
         return jsonify({'success': False, 'error': f'服务器错误: {str(e)}'}), 500
 
 
-# ==================== 处罚信息端点 ====================
+# ==================== 外部信息端点 ====================
 
-def process_penalty_task(task_id: str):
+def process_external_task(task_id: str, penalty: bool, stats: bool):
     """
-    后台线程执行处罚信息爬取任务
+    后台线程执行外部信息任务（处罚信息 + 统计信息）
     """
     task = tasks[task_id]
     task['status'] = 'processing'
-    task['progress']['total'] = 3
+    task['progress']['total'] = (1 if penalty else 0) + (1 if stats else 0)
+    current_step = 0
 
     try:
-        task['progress']['message'] = "正在爬取金监总局处罚信息..."
-        logger.info(f"处罚任务 {task_id}: 开始爬取")
+        # 处罚信息
+        if penalty:
+            current_step += 1
+            task['progress']['current'] = current_step
+            task['progress']['message'] = "正在获取处罚信息..."
+            logger.info(f"外部任务 {task_id}: 开始获取处罚信息")
 
-        all_data = fetch_all_penalty(max_per_source=5)
-        nfra_count = len(all_data.get("nfra", []))
-        pbc_count = len(all_data.get("pbc", []))
-        csrc_count = len(all_data.get("csrc", []))
+            all_data = fetch_all_penalty(max_per_source=5)
+            nfra_count = len(all_data.get("nfra", []))
+            pbc_count = len(all_data.get("pbc", []))
+            csrc_count = len(all_data.get("csrc", []))
 
-        task['progress']['current'] = 1
-        task['progress']['message'] = "正在爬取央行处罚信息..."
+            if nfra_count or pbc_count or csrc_count:
+                filepath = write_penalty_excel(all_data, output_dir=config.output_dir)
+                file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
+                task['files'].append({
+                    'name': Path(filepath).name,
+                    'path': filepath,
+                    'size': file_size,
+                    'display_name': "金融机构处罚信息.xlsx",
+                })
+                logger.info(f"外部任务 {task_id}: 处罚信息完成")
+            else:
+                logger.warning(f"外部任务 {task_id}: 处罚信息未获取到数据")
 
-        task['progress']['current'] = 2
-        task['progress']['message'] = "正在爬取证监会处罚信息..."
+        # 统计信息
+        if stats:
+            current_step += 1
+            task['progress']['current'] = current_step
+            task['progress']['message'] = "正在获取统计信息..."
+            logger.info(f"外部任务 {task_id}: 开始获取统计信息")
 
-        if nfra_count or pbc_count or csrc_count:
-            filepath = write_penalty_excel(all_data, output_dir=config.output_dir)
-            file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
-            task['files'].append({
-                'name': Path(filepath).name,
-                'path': filepath,
-                'size': file_size,
-                'display_name': "金融机构处罚信息.xlsx",
-            })
-            task['progress']['current'] = 3
-        else:
-            raise ValueError("处罚信息获取失败，未获取到数据")
+            filepath = download_all_stats(output_dir=config.output_dir)
+            if filepath:
+                file_size = Path(filepath).stat().st_size if Path(filepath).exists() else 0
+                task['files'].append({
+                    'name': Path(filepath).name,
+                    'path': filepath,
+                    'size': file_size,
+                    'display_name': "金融统计数据.xlsx",
+                })
+                logger.info(f"外部任务 {task_id}: 统计信息完成")
+            else:
+                logger.warning(f"外部任务 {task_id}: 统计信息未获取到数据")
+
+        if not task['files']:
+            raise ValueError("外部信息获取失败，未获取到任何数据")
 
         task['status'] = 'done'
-        task['progress']['message'] = (
-            f"完成! 金监总局{nfra_count}条 + 央行{pbc_count}条 + 证监会{csrc_count}条"
-        )
-        logger.info(f"处罚任务 {task_id} 完成")
+        task['progress']['message'] = f"完成! 共获取 {len(task['files'])} 个文件"
+        logger.info(f"外部任务 {task_id} 完成")
 
     except Exception as e:
         task['status'] = 'error'
         task['error'] = str(e)
-        logger.error(f"处罚任务 {task_id} 失败: {e}", exc_info=True)
+        logger.error(f"外部任务 {task_id} 失败: {e}", exc_info=True)
 
 
-@app.route('/api/penalty', methods=['POST'])
-def fetch_penalty():
-    """提交处罚信息爬取任务"""
+@app.route('/api/external', methods=['POST'])
+def fetch_external():
+    """提交外部信息获取任务（处罚信息 + 统计信息）"""
+    data = request.get_json()
+    penalty = data.get('penalty', False)
+    stats = data.get('stats', False)
+
     task_id = str(uuid.uuid4())[:8]
     tasks[task_id] = {
         'id': task_id,
         'status': 'pending',
         'progress': {
             'current': 0,
-            'total': 2,
+            'total': (1 if penalty else 0) + (1 if stats else 0),
             'message': '等待开始...',
         },
         'files': [],
@@ -633,8 +658,8 @@ def fetch_penalty():
     }
 
     thread = threading.Thread(
-        target=process_penalty_task,
-        args=(task_id,),
+        target=process_external_task,
+        args=(task_id, penalty, stats),
         daemon=True
     )
     thread.start()

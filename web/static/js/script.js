@@ -479,12 +479,32 @@ document.getElementById('dividendForm').addEventListener('submit', async e => {
     await submitFormData('/api/dividend', fd, '分红查询', document.getElementById('dividendSubmitBtn'));
 });
 
-// ==================== 模块5: 处罚信息 ====================
+// ==================== 模块5: 外部信息 ====================
+
+const extCheckboxes = document.querySelectorAll('.ext-checkbox');
+const extBtn = document.getElementById('penaltySubmitBtn');
+
+function updateExtBtn() {
+    const any = Array.from(extCheckboxes).some(cb => cb.checked);
+    extBtn.disabled = !any;
+    extBtn.style.opacity = any ? '1' : '0.5';
+}
+extCheckboxes.forEach(cb => cb.addEventListener('change', updateExtBtn));
 
 document.getElementById('penaltyForm').addEventListener('submit', async e => {
     e.preventDefault();
-    await submitJson('/api/penalty', {}, '处罚信息', document.getElementById('penaltySubmitBtn'));
+    const penalty = document.getElementById('extPenalty').checked;
+    const stats = document.getElementById('extStats').checked;
+    if (!penalty && !stats) return alert('请至少勾选一项');
+    
+    const labelParts = [];
+    if (penalty) labelParts.push('处罚信息');
+    if (stats) labelParts.push('统计信息');
+    const label = labelParts.join(' + ');
+    
+    await submitJson('/api/external', { penalty, stats }, label, extBtn);
 });
+updateExtBtn();
 
 // ==================== 启动 ====================
 initYearSelectors();

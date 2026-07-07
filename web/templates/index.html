@@ -47,7 +47,7 @@
             </button>
             <button class="tab" data-tab="penalty">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <span>处罚信息</span>
+                <span>外部信息</span>
             </button>
         </nav>
 
@@ -222,11 +222,26 @@
                     </form>
                 </div>
 
-                <!-- ========== 处罚信息 ========== -->
+                <!-- ========== 外部信息 ========== -->
                 <div class="tab-panel" id="panel-penalty">
-                    <div class="panel-title">金融机构行政处罚信息</div>
+                    <div class="panel-title">外部信息获取</div>
                     <form id="penaltyForm">
-                        <p class="panel-desc">从国家金融监督管理总局和证监会官网获取最新行政处罚信息。</p>
+                        <div class="form-group">
+                            <label class="toggle-row">
+                                <span>处罚信息</span>
+                                <span class="toggle">
+                                    <input type="checkbox" class="ext-checkbox" id="extPenalty" checked>
+                                    <span class="toggle-knob"></span>
+                                </span>
+                            </label>
+                            <label class="toggle-row">
+                                <span>统计信息</span>
+                                <span class="toggle">
+                                    <input type="checkbox" class="ext-checkbox" id="extStats">
+                                    <span class="toggle-knob"></span>
+                                </span>
+                            </label>
+                        </div>
                         <div class="form-actions">
                             <button type="submit" class="btn btn-danger" id="penaltySubmitBtn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -256,6 +271,6 @@
         </main>
     </div>
 
-    <script src="/static/js/script.js?v=20260703"></script>
+    <script src="/static/js/script.js?v=20260707"></script>
 </body>
 </html>
