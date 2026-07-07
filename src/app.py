@@ -880,6 +880,241 @@ def fetch_dividend():
     })
 
 
+@app.route('/api/download_all', methods=['POST'])
+def download_all():
+    """批量下载多个文件（打包为zip）"""
+    data = request.get_json()
+    if not data or not data.get('files'):
+        return jsonify({'success': False, 'error': '未提供文件列表'}), 400
+
+    filenames = data['files']
+    label = data.get('label', '批量下载')
+    output_dir = str(config.output_dir)
+
+    safe_label = re.sub(r'[\\/:*?"<>|]', '_', str(label))
+
+    import io
+    import zipfile
+    zip_buffer = io.BytesIO()
+    added = 0
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for fn in filenames:
+            fn = os.path.basename(fn)
+            full_path = os.path.join(output_dir, fn)
+            if os.path.exists(full_path):
+                zf.write(full_path, fn)
+                added += 1
+
+    if added == 0:
+        return jsonify({'success': False, 'error': '所有文件均不存在'}), 404
+
+    zip_buffer.seek(0)
+    zip_name = f"{safe_label}_{datetime.now().strftime('%Y%m%d')}.zip"
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=zip_name
+    )
+
+
+# ==================== 金融机构法人名录端点 ====================
+
+def process_institution_task(task_id: str, types: List[str]):
+    """后台线程执行金融机构法人名录爬取任务"""
+    task = tasks[task_id]
+    task['status'] = 'processing'
+    task['progress']['total'] = len(types)
+
+    try:
+        if 'bank_insurance' in types:
+            task['progress']['message'] = "正在下载银行保险法人名单 PDF..."
+            logger.info(f"机构名录任务 {task_id}: 开始下载银行保险法人 PDF")
+            pdf_files = download_nfra_pdfs(output_dir=config.output_dir)
+            for fp in pdf_files:
+                file_size = os.path.getsize(fp) if os.path.exists(fp) else 0
+                label = "银行" if "银行" in os.path.basename(fp) else "保险"
+                task['files'].append({
+                    'name': os.path.basename(fp),
+                    'path': fp,
+                    'size': file_size,
+                    'display_name': f"{label}法人名单.pdf",
+                })
+            task['progress']['current'] += 1
+
+        if 'securities_fund' in types:
+            task['progress']['message'] = "正在下载证券基金期货公司名录..."
+            logger.info(f"机构名录任务 {task_id}: 开始下载证券基金期货公司名录")
+            sf_filepath = download_csrc_to_combined_xlsx(output_dir=config.output_dir)
+            if sf_filepath:
+                file_size = os.path.getsize(sf_filepath) if os.path.exists(sf_filepath) else 0
+                task['files'].append({
+                    'name': os.path.basename(sf_filepath),
+                    'path': sf_filepath,
+                    'size': file_size,
+                    'display_name': "证券基金期货公司名录.xlsx",
+                })
+            task['progress']['current'] += 1
+
+        if 'amac' in types:
+            task['progress']['message'] = "正在爬取公募基金管理人名录..."
+            logger.info(f"机构名录任务 {task_id}: 开始爬取公募基金名录")
+            amac_records = fetch_fund_manager_list()
+            if amac_records:
+                amac_filepath = write_amac_excel(amac_records, output_dir=config.output_dir)
+                file_size = os.path.getsize(amac_filepath) if os.path.exists(amac_filepath) else 0
+                task['files'].append({
+                    'name': os.path.basename(amac_filepath),
+                    'path': amac_filepath,
+                    'size': file_size,
+                    'display_name': "公募基金管理人名录.xlsx",
+                })
+            task['progress']['current'] += 1
+
+        if not task['files']:
+            raise ValueError("所有名录获取均失败，未获取到数据")
+
+        task['status'] = 'done'
+        task['progress']['message'] = "完成! 名录已生成"
+        logger.info(f"机构名录任务 {task_id} 完成")
+
+    except Exception as e:
+        task['status'] = 'error'
+        task['error'] = str(e)
+        logger.error(f"机构名录任务 {task_id} 失败: {e}", exc_info=True)
+
+
+@app.route('/api/institutions', methods=['POST'])
+def fetch_institutions():
+    """提交金融机构法人名录爬取任务"""
+    try:
+        data = request.get_json(silent=True) or {}
+        types = data.get('types', [])
+
+        if not types:
+            return jsonify({'success': False, 'error': '请至少选择一种名录类型'}), 400
+
+        valid_types = {'amac', 'bank_insurance', 'securities_fund'}
+        types = [t for t in types if t in valid_types]
+        if not types:
+            return jsonify({'success': False, 'error': '无效的名录类型'}), 400
+
+        task_id = str(uuid.uuid4())[:8]
+        tasks[task_id] = {
+            'id': task_id,
+            'status': 'pending',
+            'progress': {'current': 0, 'total': len(types), 'message': '等待开始...'},
+            'files': [],
+            'error': None,
+            'created_at': time.time(),
+        }
+
+        thread = threading.Thread(target=process_institution_task, args=(task_id, types), daemon=True)
+        thread.start()
+
+        return jsonify({'success': True, 'task_id': task_id})
+    except Exception as e:
+        logger.error(f"fetch_institutions 异常: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': f'服务器错误: {str(e)}'}), 500
+
+
+# ==================== 外部信息端点 ====================
+
+def process_external_task(task_id: str, penalty: bool, stats: bool):
+    """后台线程执行外部信息任务（处罚信息 + 统计信息）"""
+    task = tasks[task_id]
+    task['status'] = 'processing'
+    task['progress']['total'] = (1 if penalty else 0) + (1 if stats else 0)
+    current_step = 0
+
+    try:
+        if penalty:
+            current_step += 1
+            task['progress']['current'] = current_step
+            task['progress']['message'] = "正在获取处罚信息..."
+            logger.info(f"外部任务 {task_id}: 开始获取处罚信息")
+
+            all_data = fetch_all_penalty(max_per_source=5)
+            nfra_count = len(all_data.get("nfra", []))
+            pbc_count = len(all_data.get("pbc", []))
+            csrc_count = len(all_data.get("csrc", []))
+
+            if nfra_count or pbc_count or csrc_count:
+                filepath = write_penalty_excel(all_data, output_dir=config.output_dir)
+                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                task['files'].append({
+                    'name': os.path.basename(filepath),
+                    'path': filepath,
+                    'size': file_size,
+                    'display_name': "金融机构处罚信息.xlsx",
+                })
+                logger.info(f"外部任务 {task_id}: 处罚信息完成")
+            else:
+                logger.warning(f"外部任务 {task_id}: 处罚信息未获取到数据")
+
+        if stats:
+            current_step += 1
+            task['progress']['current'] = current_step
+            task['progress']['message'] = "正在获取统计信息..."
+            logger.info(f"外部任务 {task_id}: 开始获取统计信息")
+
+            filepath = download_all_stats(output_dir=config.output_dir)
+            if filepath:
+                file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
+                task['files'].append({
+                    'name': os.path.basename(filepath),
+                    'path': filepath,
+                    'size': file_size,
+                    'display_name': "金融统计数据.xlsx",
+                })
+                logger.info(f"外部任务 {task_id}: 统计信息完成")
+            else:
+                logger.warning(f"外部任务 {task_id}: 统计信息未获取到数据")
+
+        if not task['files']:
+            raise ValueError("外部信息获取失败，未获取到任何数据")
+
+        task['status'] = 'done'
+        task['progress']['message'] = f"完成! 共获取 {len(task['files'])} 个文件"
+        logger.info(f"外部任务 {task_id} 完成")
+
+    except Exception as e:
+        task['status'] = 'error'
+        task['error'] = str(e)
+        logger.error(f"外部任务 {task_id} 失败: {e}", exc_info=True)
+
+
+@app.route('/api/external', methods=['POST'])
+def fetch_external():
+    """提交外部信息获取任务（处罚信息 + 统计信息）"""
+    # 兼容 JSON 和 FormData
+    if request.is_json:
+        data = request.get_json()
+    else:
+        data = request.form
+    penalty = str(data.get('penalty', '0')) == '1'
+    stats = str(data.get('stats', '0')) == '1'
+
+    task_id = str(uuid.uuid4())[:8]
+    tasks[task_id] = {
+        'id': task_id,
+        'status': 'pending',
+        'progress': {
+            'current': 0,
+            'total': (1 if penalty else 0) + (1 if stats else 0),
+            'message': '等待开始...',
+        },
+        'files': [],
+        'error': None,
+        'created_at': time.time(),
+    }
+
+    thread = threading.Thread(target=process_external_task, args=(task_id, penalty, stats), daemon=True)
+    thread.start()
+
+    return jsonify({'success': True, 'task_id': task_id})
+
+
 # ==================== 启动 ====================
 
 if __name__ == '__main__':

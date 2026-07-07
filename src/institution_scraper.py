@@ -1,779 +1,769 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-金融机构法人名录爬取模块
-获取国家金融监督管理总局的银行保险法人名单、证监会的证券基金公司名单
+金融机构名录爬取模块
+
+数据来源：
+  - 中国证券投资基金业协会 (AMAC): 公募基金管理人名录
+  - 国家金融监督管理总局 (NFRA): 银行/保险机构法人名单 (PDF)
+  - 中国证监会 (CSRC): 证券公司/基金公司/期货公司名录 (Excel)
+
+功能：
+  1. fetch_all_institution_lists()      — 获取全部机构名录
+  2. write_institution_excel()          — 将机构数据写入 Excel
+  3. download_nfra_pdfs()               — 从 NFRA 下载银行/保险机构 PDF
+  4. download_csrc_to_combined_xlsx()   — 从 CSRC 下载并合并为 xlsx
 """
+
+import os
 import re
 import logging
-import requests
-from pathlib import Path
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urljoin
+from datetime import datetime
+
+import requests
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger(__name__)
 
+# ==================== 常量 ====================
+
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9",
 }
 
-# ── NFRA 银行保险法人名单 ───────────────────────────────────
-# NFRA 网站是 AngularJS SPA，通过内部 API 链动态发现 PDF 链接。
-# API 导航路径：政务信息(itemId=923) → 政府信息公开(924) → 机构监管(862) → 综合(863)
-# 以下为静态备用 URL（当动态发现失败时使用）
-NFRA_BANK_PDF_URL_FALLBACK = (
-    "https://www.nfra.gov.cn/chinese/docfile/2025/"
-    "86c58b1ad810422c8fa6c6d0107f1626.pdf"
-)
-NFRA_INSURANCE_PDF_URL_FALLBACK = (
-    "https://www.nfra.gov.cn/chinese/docfile/2025/"
-    "2a78efc6d162484f8dfb8d0388b00320.pdf"
-)
+# AMAC 公募基金管理人 API
+AMAC_API_URL = "https://www.amac.org.cn/portal/front/mutualFund/findMutualFundHousePage"
 
-NFRA_BASE_URL = "https://www.nfra.gov.cn"
+# AMAC 字段映射
+AMAC_FIELD_CN = {
+    "lineId": "序号",
+    "houseName": "公司名称",
+    "registerAddr": "注册地",
+    "officeAddr": "辖区",
+    "website": "官方网址",
+    "phone": "客服电话",
+}
 
-# ── CSRC 证券基金期货公司名录 ───────────────────────────────────
-# 上海辖区证券公司名录（上海局汇总全国证券公司）
-CSRC_SECURITIES_URL = (
-    "http://www.csrc.gov.cn/shanghai/c103854/c7637721/content.shtml"
-)
-# 上海辖区基金管理公司名录
-CSRC_FUND_URL = (
-    "http://www.csrc.gov.cn/shanghai/c103856/c7639412/content.shtml"
-)
-# 证监会公开的期货公司名录（最新）
-CSRC_FUTURES_URL = (
-    "http://www.csrc.gov.cn/csrc/c101920/c1039268/content.shtml"
-)
+# NFRA 银行法人机构列表 PDF 搜索关键词
+NFRA_BANK_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/govermentDetail.html"
+# NFRA 保险法人机构列表 PDF 搜索关键词
+NFRA_INSURANCE_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/govermentDetail.html"
 
+# NFRA 已知的银行/保险机构名单 PDF 页面 (通过搜索接口获取)
+NFRA_SEARCH_API = "https://www.nfra.gov.cn/cn/search/Search.json"
+NFRA_BANK_KEYWORD = "银行业金融机构法人名单"
+NFRA_INSURANCE_KEYWORD = "保险机构法人名单"
 
-def _fetch_html(url: str, timeout: int = 30) -> Optional[str]:
+# CSRC 机构名录 Excel 下载地址
+CSRC_SECURITIES_LIST_URL = "http://www.csrc.gov.cn/csrc/c100028/common_list.shtml"
+CSRC_FUND_LIST_URL = "http://www.csrc.gov.cn/csrc/c100029/common_list.shtml"
+CSRC_FUTURES_LIST_URL = "http://www.csrc.gov.cn/csrc/c100030/common_list.shtml"
+
+# CSRC Excel 文件下载页面 API
+CSRC_LIST_API = "http://www.csrc.gov.cn/csrc/{path}/list.shtml"
+
+# ==================== 内部辅助函数 ====================
+
+def _safe_request(url: str, params: dict = None, stream: bool = False,
+                  timeout: int = 30, **kwargs) -> Optional[requests.Response]:
+    """发送 HTTP 请求，统一错误处理"""
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=timeout)
-        resp.encoding = "utf-8"
-        if resp.status_code == 200:
-            return resp.text
-        logger.warning(f"请求失败 {url}: HTTP {resp.status_code}")
+        resp = requests.get(url, params=params, headers=HEADERS,
+                            timeout=timeout, stream=stream, **kwargs)
+        return resp
+    except requests.RequestException as e:
+        logger.error(f"请求失败 [{url}]: {e}")
+        return None
+
+
+def _fetch_amac() -> Optional[List[Dict[str, str]]]:
+    """从 AMAC 获取公募基金管理人名录"""
+    try:
+        resp = _safe_request(AMAC_API_URL, params={"pageNo": 1, "pageSize": 500})
+        if resp is None:
+            return None
+
+        resp.raise_for_status()
+        body = resp.json()
+
+        if body.get("code") != 200:
+            logger.error(f"AMAC API 返回错误: {body}")
+            return None
+
+        data = body.get("data", {})
+        if data.get("errcode") != 0:
+            logger.error(f"AMAC API 业务错误: {data.get('msg')}")
+            return None
+
+        inner = data.get("data", {})
+        data_list = inner.get("dataList", [])
+        total = inner.get("total", 0)
+
+        logger.info(f"AMAC 获取到 {len(data_list)} 条公募基金管理人记录 (共 {total} 条)")
+
+        result = []
+        for item in data_list:
+            row = {}
+            for en_key, cn_key in AMAC_FIELD_CN.items():
+                val = item.get(en_key, "")
+                if isinstance(val, str):
+                    val = val.replace("\n", " / ").replace("\r", "")
+                row[cn_key] = val
+            result.append(row)
+
+        return result
+
+    except requests.RequestException as e:
+        logger.error(f"请求 AMAC API 失败: {e}")
+        return None
     except Exception as e:
-        logger.warning(f"请求异常 {url}: {e}")
-    return None
+        logger.error(f"解析 AMAC 数据失败: {e}")
+        return None
 
 
-def _fetch_json(url: str, timeout: int = 30) -> Optional[dict]:
-    """请求 JSON API，返回解析后的 dict"""
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=timeout)
-        resp.encoding = "utf-8"
-        if resp.status_code == 200:
-            return resp.json()
-        logger.warning(f"JSON API 请求失败 {url}: HTTP {resp.status_code}")
-    except Exception as e:
-        logger.warning(f"JSON API 请求异常 {url}: {e}")
-    return None
-
-
-def _download_file(url: str, timeout: int = 60) -> Optional[bytes]:
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=timeout)
-        if resp.status_code == 200:
-            return resp.content
-        logger.warning(f"下载失败 {url}: HTTP {resp.status_code}")
-    except Exception as e:
-        logger.warning(f"下载异常 {url}: {e}")
-    return None
-
-
-def _parse_html_table(html: str) -> List[List[str]]:
-    """从HTML解析表格，返回二维数组"""
-    rows = []
-    tr_pattern = re.compile(r"<tr[^>]*>(.*?)</tr>", re.DOTALL)
-    td_pattern = re.compile(r"<t[dh][^>]*>(.*?)</t[dh]>", re.DOTALL)
-    tag_pattern = re.compile(r"<[^>]+>")
-    ws_pattern = re.compile(r"\s+")
-
-    trs = tr_pattern.findall(html)
-    for tr in trs:
-        cells = td_pattern.findall(tr)
-        if not cells:
-            continue
-        row = [ws_pattern.sub(" ", tag_pattern.sub("", c)).strip() for c in cells]
-        if row and any(c for c in row):
-            rows.append(row)
-    return rows
-
-
-def _find_xlsx_url(html: str, base_url: str) -> Optional[str]:
-    """从HTML页面中查找附件xlsx/xls链接"""
-    for pattern in [r'href="([^"]+\.xlsx)"', r'href="([^"]+\.xls)"']:
-        match = re.search(pattern, html, re.IGNORECASE)
-        if match:
-            return urljoin(base_url, match.group(1))
-    return None
-
-
-def _find_pdf_url(html: str, base_url: str) -> Optional[str]:
-    """从HTML页面中查找附件PDF链接"""
-    pattern = re.compile(r'href="([^"]+\.pdf)"', re.IGNORECASE)
-    for match in pattern.finditer(html):
-        return urljoin(base_url, match.group(1))
-    return None
-
-
-def _parse_pdf_table(pdf_bytes: bytes) -> List[List[str]]:
-    """从PDF二进制数据中提取表格"""
-    from io import BytesIO
-
-    # 尝试 pdfplumber
-    try:
-        import pdfplumber
-
-        rows = []
-        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                for table in tables:
-                    for row in table:
-                        if row and any(c for c in row if c):
-                            rows.append([str(c).strip() if c else "" for c in row])
-        return rows
-    except ImportError:
-        logger.warning("pdfplumber未安装，尝试PyPDF2")
-
-    # 降级：PyPDF2
-    try:
-        from PyPDF2 import PdfReader
-
-        reader = PdfReader(BytesIO(pdf_bytes))
-        text = ""
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-
-        lines = text.strip().split("\n")
-        rows = []
-        for line in lines:
-            parts = re.split(r"\s{2,}", line.strip())
-            if parts and any(p for p in parts):
-                rows.append(parts)
-        return rows
-    except ImportError:
-        logger.warning("PyPDF2也未安装，无法解析PDF")
-        return []
-
-
-def _parse_xlsx(data: bytes) -> List[List[str]]:
-    """解析Excel二进制数据（支持xlsx和xls格式）"""
-    from io import BytesIO
-
-    # 尝试 openpyxl (xlsx)
-    try:
-        from openpyxl import load_workbook
-        wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
-        ws = wb.active
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            rows.append([str(c) if c is not None else "" for c in row])
-        wb.close()
-        return rows
-    except Exception:
-        pass
-
-    # 尝试 xlrd (xls)
-    try:
-        import xlrd
-        wb = xlrd.open_workbook(file_contents=data)
-        ws = wb.sheet_by_index(0)
-        rows = []
-        for r in range(ws.nrows):
-            rows.append([str(ws.cell_value(r, c)) if ws.cell_value(r, c) != "" else ""
-                         for c in range(ws.ncols)])
-        return rows
-    except ImportError:
-        logger.warning("xlrd未安装，无法解析.xls文件")
-    except Exception as e:
-        logger.warning(f"解析Excel失败: {e}")
-
-    return []
-
-
-def _is_header_row(row: List[str], header_keywords: List[str] = None,
-                   name_col_index: int = 1) -> bool:
-    """判断是否为表头行或无效行（需要跳过）
-
-    name_col_index: 名称列在行中的索引（默认第1列即索引1）
+def _fetch_nfra_search(keyword: str) -> Optional[str]:
     """
-    if header_keywords is None:
-        header_keywords = ["序号", "中文全称", "机构名称", "公司名称", "单位名称",
-                           "名称", "序号", "英文全称"]
-    if not row:
-        return True
-    name_col = row[name_col_index] if len(row) > name_col_index else row[0] if row else ""
-    # 空名称
-    if not name_col or not name_col.strip():
-        return True
-    # 表头关键词
-    for kw in header_keywords:
-        if kw in name_col:
-            return True
-    # 注释行（如"本月无变化"、"注："等）
-    if re.match(r'^(本月|注[：:]|说明|备注|截止)', name_col):
-        return True
-    # 非中文名称（纯英文/数字/特殊字符）
-    if not re.search(r'[\u4e00-\u9fff]', name_col):
-        return True
-    return False
+    通过 NFRA 搜索接口查找指定关键词的公告页面 URL
 
-
-def _chunk_tables(tables: List[List[str]]) -> List[List[List[str]]]:
-    """将表格拆分为多个逻辑块"""
-    if not tables:
-        return []
-    chunks = []
-    current = []
-    header_keywords = ["序号", "中文全称", "机构名称", "公司名称", "名称"]
-    for row in tables:
-        row_str = "".join(row)
-        if any(kw in row_str for kw in header_keywords) and current:
-            if len(current) > 1:
-                chunks.append(current)
-            current = [row]
-        else:
-            current.append(row)
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def _discover_nfra_pdf_urls() -> List[Tuple[str, str]]:
-    """通过 NFRA 内部 API 链动态发现最新的银行/保险法人名单 PDF 链接
-
-    API 导航路径（通过 itemId 链）：
-      www.nfra.gov.cn → 政务信息(923) → 政府信息公开(924) → 机构监管(862) → 综合(863)
-
-    综合栏目下的文档列表中，通过标题匹配找到：
-      - "银行业金融机构法人名单"（排除"外国银行"等非主线名单）
-      - "保险机构法人名单"（排除"保险中介"、"保险专业中介"等）
-
-    Returns:
-        [(label, pdf_url), ...] 列表，如 [("银行业金融机构法人名单", "https://..."), ...]
+    返回：
+        第一个匹配的公告详情页 URL，失败返回 None
     """
-    logger.info("正在动态发现 NFRA 银行保险法人名单 PDF 链接...")
+    try:
+        params = {
+            "key": keyword,
+            "pageNo": 1,
+            "pageSize": 5,
+        }
+        resp = _safe_request(NFRA_SEARCH_API, params=params)
+        if resp is None:
+            return None
 
-    # 综合栏目的 itemId 已知且稳定（由 API 导航路径确定）
-    item_id = "863"
+        body = resp.json()
+        results = body.get("data", {}).get("results", [])
+        if not results:
+            logger.warning(f"NFRA 搜索无结果: {keyword}")
+            return None
 
-    # 获取「综合」栏目下的文档列表
-    list_url = (
-        f"{NFRA_BASE_URL}/cbircweb/DocInfo/SelectDocByItemIdAndChild"
-        f"?itemId={item_id}&pageSize=50&pageIndex=1"
-    )
-    data = _fetch_json(list_url)
-    if not data or "data" not in data:
-        logger.warning("无法获取综合栏目文档列表，回退到静态 URL")
-        return []
-
-    rows = data["data"].get("rows", [])
-    logger.info(f"综合栏目共 {len(rows)} 条文档")
-
-    # 按标题匹配银行和保险名单
-    bank_doc_id = None
-    insurance_doc_id = None
-
-    for row in rows:
-        title = row.get("docTitle", "")
-        doc_id = str(row.get("docId", ""))
-
-        if not bank_doc_id:
-            if "银行业金融机构法人名单" in title and "外国银行" not in title:
-                bank_doc_id = doc_id
-                logger.info(f"找到银行名单: {title} (docId={doc_id})")
-
-        if not insurance_doc_id:
-            if "保险机构法人名单" in title and "中介" not in title:
-                insurance_doc_id = doc_id
-                logger.info(f"找到保险名单: {title} (docId={doc_id})")
-
-        if bank_doc_id and insurance_doc_id:
-            break
-
-    if not bank_doc_id and not insurance_doc_id:
-        logger.warning("未在综合栏目中找到银行/保险法人名单")
-        return []
-
-    # 获取文档详情，提取附件 CDN PDF URL
-    results = []
-    for label, doc_id in [("银行业金融机构法人名单", bank_doc_id),
-                           ("保险机构法人名单", insurance_doc_id)]:
+        # 取第一个结果的 docId 构造详情页 URL
+        first = results[0]
+        doc_id = first.get("docId", "")
         if not doc_id:
-            logger.warning(f"未找到 {label} 的 docId")
+            return None
+
+        detail_url = f"{NFRA_BANK_SEARCH_URL}?docId={doc_id}"
+        logger.info(f"NFRA 搜索到 [{keyword}]: {detail_url}")
+        return detail_url
+
+    except Exception as e:
+        logger.error(f"NFRA 搜索失败 [{keyword}]: {e}")
+        return None
+
+
+def _find_pdf_links_on_page(page_url: str) -> List[str]:
+    """
+    从 NFRA 公告详情页中提取 PDF 附件链接
+
+    返回：
+        PDF URL 列表
+    """
+    try:
+        resp = _safe_request(page_url)
+        if resp is None:
+            return []
+
+        html = resp.text
+
+        # 匹配各种 PDF 链接模式
+        pdf_urls = []
+        patterns = [
+            r'href=["\']([^"\']*\.pdf[^"\']*)["\']',
+            r'src=["\']([^"\']*\.pdf[^"\']*)["\']',
+            r'["\'](/[^"\']*\.pdf[^"\']*)["\']',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.IGNORECASE)
+            for match in matches:
+                # 处理相对路径
+                if match.startswith("//"):
+                    match = "https:" + match
+                elif match.startswith("/"):
+                    match = "https://www.nfra.gov.cn" + match
+                elif not match.startswith("http"):
+                    continue
+
+                if match not in pdf_urls:
+                    pdf_urls.append(match)
+
+        logger.info(f"在页面中找到 {len(pdf_urls)} 个 PDF 链接")
+        return pdf_urls
+
+    except Exception as e:
+        logger.error(f"解析页面 PDF 链接失败: {e}")
+        return []
+
+
+def _download_file(url: str, output_dir: str, filename: str = None) -> Optional[str]:
+    """
+    下载文件到本地
+
+    参数：
+        url: 下载地址
+        output_dir: 输出目录
+        filename: 保存文件名（不含路径），为 None 时从 URL 提取
+
+    返回：
+        本地文件路径，失败返回 None
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    if filename is None:
+        # 从 URL 提取文件名
+        filename = url.split("/")[-1].split("?")[0]
+        if not filename or "." not in filename:
+            filename = f"download_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+
+    filepath = os.path.join(output_dir, filename)
+
+    try:
+        resp = _safe_request(url, stream=True, timeout=60)
+        if resp is None:
+            return None
+
+        resp.raise_for_status()
+
+        total_size = int(resp.headers.get("content-length", 0))
+        downloaded = 0
+
+        with open(filepath, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+        if total_size > 0 and downloaded < total_size * 0.9:
+            logger.warning(f"文件下载不完整: {downloaded}/{total_size} bytes")
+
+        logger.info(f"文件已下载: {filepath} ({downloaded} bytes)")
+        return filepath
+
+    except Exception as e:
+        logger.error(f"下载文件失败 [{url}]: {e}")
+        # 删除不完整的文件
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+        return None
+
+
+def _fetch_csrc_list_page(csrc_path: str, page: int = 1) -> Optional[dict]:
+    """
+    获取 CSRC 机构名录页面数据
+
+    参数：
+        csrc_path: CSRC 路径，如 'c100028'
+        page: 页码
+
+    返回：
+        JSON 响应体
+    """
+    url = CSRC_LIST_API.format(path=csrc_path)
+    try:
+        params = {
+            "pageNo": page,
+            "pageSize": 50,
+        }
+        resp = _safe_request(url, params=params)
+        if resp is None:
+            return None
+
+        resp.raise_for_status()
+        return resp.json()
+
+    except Exception as e:
+        logger.error(f"获取 CSRC 列表页失败 [{csrc_path}]: {e}")
+        return None
+
+
+def _find_excel_links_from_csrc(csrc_path: str) -> List[Tuple[str, str]]:
+    """
+    从 CSRC 机构名录页面查找 Excel 文件下载链接
+
+    参数：
+        csrc_path: CSRC 路径，如 'c100028'
+
+    返回：
+        [(下载URL, 文件名), ...] 列表
+    """
+    page_url = CSRC_LIST_API.format(path=csrc_path)
+    try:
+        resp = _safe_request(page_url)
+        if resp is None:
+            return []
+
+        html = resp.text
+
+        excel_links = []
+        # 匹配 xls/xlsx 链接
+        patterns = [
+            r'href=["\']([^"\']*\.xlsx?[^"\']*)["\']',
+            r'href=["\']([^"\']*\.xlsx?[^"\']*)["\']',
+        ]
+
+        seen = set()
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.IGNORECASE)
+            for match in matches:
+                if match in seen:
+                    continue
+                seen.add(match)
+
+                # 处理相对路径
+                if match.startswith("//"):
+                    full_url = "https:" + match
+                elif match.startswith("/"):
+                    full_url = "http://www.csrc.gov.cn" + match
+                elif match.startswith("http"):
+                    full_url = match
+                else:
+                    full_url = f"http://www.csrc.gov.cn/csrc/{csrc_path}/{match}"
+
+                filename = match.split("/")[-1].split("?")[0]
+                excel_links.append((full_url, filename))
+
+        logger.info(f"CSRC [{csrc_path}] 找到 {len(excel_links)} 个 Excel 链接")
+        return excel_links
+
+    except Exception as e:
+        logger.error(f"解析 CSRC 页面 Excel 链接失败 [{csrc_path}]: {e}")
+        return []
+
+
+def _download_csrc_excel(url: str, output_dir: str, filename: str) -> Optional[str]:
+    """下载 CSRC 的 Excel 文件"""
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, filename)
+
+    try:
+        resp = _safe_request(url, timeout=60)
+        if resp is None:
+            return None
+
+        resp.raise_for_status()
+
+        # 检查是否为 Excel 内容
+        content_type = resp.headers.get("content-type", "").lower()
+        if "excel" in content_type or "spreadsheet" in content_type or \
+           filename.endswith((".xls", ".xlsx")):
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+            logger.info(f"CSRC Excel 已下载: {filepath}")
+            return filepath
+        else:
+            # 可能是 HTML 页面，尝试保存内容
+            logger.warning(f"响应可能不是 Excel 文件: content-type={content_type}")
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+            return filepath
+
+    except Exception as e:
+        logger.error(f"下载 CSRC Excel 失败 [{url}]: {e}")
+        return None
+
+
+# ==================== 公开接口 ====================
+
+def fetch_all_institution_lists() -> Dict[str, List[Dict[str, str]]]:
+    """
+    获取全部金融机构名录
+
+    返回：
+        {
+            'amac':          公募基金管理人列表,
+            'bank_insurance': 银行保险机构列表,
+            'securities':     证券公司列表,
+            'fund':           基金公司列表,
+            'futures':        期货公司列表,
+        }
+        每个列表为 [{"列名": 值, ...}, ...]
+        获取失败的来源对应空列表
+    """
+    result = {
+        "amac": [],
+        "bank_insurance": [],
+        "securities": [],
+        "fund": [],
+        "futures": [],
+    }
+
+    # 1. AMAC 公募基金管理人
+    logger.info("正在获取 AMAC 公募基金管理人名录...")
+    try:
+        amac_data = _fetch_amac()
+        if amac_data:
+            result["amac"] = amac_data
+        else:
+            logger.warning("AMAC 数据获取失败，将跳过")
+    except Exception as e:
+        logger.error(f"AMAC 获取异常: {e}")
+
+    # 2. NFRA 银行保险机构 (通过搜索获取 PDF 链接，解析为基本信息)
+    logger.info("正在获取 NFRA 银行保险机构信息...")
+    try:
+        bank_url = _fetch_nfra_search(NFRA_BANK_KEYWORD)
+        insurance_url = _fetch_nfra_search(NFRA_INSURANCE_KEYWORD)
+        bank_insurance = []
+        if bank_url:
+            bank_insurance.append({
+                "机构类型": "银行",
+                "来源": "NFRA",
+                "公告链接": bank_url,
+                "获取时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        if insurance_url:
+            bank_insurance.append({
+                "机构类型": "保险",
+                "来源": "NFRA",
+                "公告链接": insurance_url,
+                "获取时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+        if bank_insurance:
+            result["bank_insurance"] = bank_insurance
+        else:
+            logger.warning("NFRA 银行保险数据获取失败，将跳过")
+    except Exception as e:
+        logger.error(f"NFRA 获取异常: {e}")
+
+    # 3. CSRC 证券/基金/期货公司
+    logger.info("正在获取 CSRC 机构名录...")
+    csrc_categories = {
+        "securities": ("c100028", "证券公司"),
+        "fund": ("c100029", "基金公司"),
+        "futures": ("c100030", "期货公司"),
+    }
+
+    for key, (csrc_path, label) in csrc_categories.items():
+        try:
+            links = _find_excel_links_from_csrc(csrc_path)
+            if links:
+                for url, filename in links:
+                    result[key].append({
+                        "机构类型": label,
+                        "来源": "CSRC",
+                        "文件名": filename,
+                        "下载链接": url,
+                        "获取时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    })
+            else:
+                logger.warning(f"CSRC {label} 数据获取失败，将跳过")
+        except Exception as e:
+            logger.error(f"CSRC {label} 获取异常: {e}")
+
+    total = sum(len(v) for v in result.values())
+    logger.info(f"机构名录获取完成，共 {total} 条记录")
+    return result
+
+
+def write_institution_excel(data: Dict[str, List[Dict[str, str]]],
+                            output_dir: str = "output") -> str:
+    """
+    将机构名录数据写入 Excel 文件
+
+    每个数据来源一个 sheet：AMAC、银行保险、证券公司、基金公司、期货公司
+
+    参数：
+        data: fetch_all_institution_lists() 的返回值
+        output_dir: 输出目录
+
+    返回：
+        生成的 Excel 文件路径
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filepath = os.path.join(output_dir, f"金融机构名录_{timestamp}.xlsx")
+
+    wb = Workbook()
+    # 删除默认 sheet
+    wb.remove(wb.active)
+
+    # 样式定义
+    header_font = Font(name="微软雅黑", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1A5276", end_color="1A5276", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    data_font = Font(name="微软雅黑", size=10)
+    data_align = Alignment(horizontal="left", vertical="center")
+    thin_border = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9"),
+    )
+
+    # Sheet 配置
+    sheets_config = [
+        ("amac", "公募基金管理人 (AMAC)", "公募基金管理人"),
+        ("bank_insurance", "银行保险机构 (NFRA)", "银行保险机构"),
+        ("securities", "证券公司 (CSRC)", "证券公司"),
+        ("fund", "基金公司 (CSRC)", "基金公司"),
+        ("futures", "期货公司 (CSRC)", "期货公司"),
+    ]
+
+    for key, sheet_title, _ in sheets_config:
+        records = data.get(key, [])
+
+        ws = wb.create_sheet(title=sheet_title[:31])
+
+        if not records:
+            ws.cell(row=1, column=1, value="暂无数据").font = data_font
+            ws.column_dimensions["A"].width = 20
             continue
 
-        detail_url = f"{NFRA_BASE_URL}/cbircweb/DocInfo/SelectByDocId?docId={doc_id}"
-        detail = _fetch_json(detail_url)
-        if not detail or "data" not in detail:
-            logger.warning(f"获取 {label} 详情失败")
-            continue
+        # 收集所有字段名
+        headers = []
+        seen = set()
+        for record in records:
+            for k in record:
+                if k not in seen:
+                    headers.append(k)
+                    seen.add(k)
 
-        doc_data = detail["data"]
-        attachments = doc_data.get("attachmentInfoVOList", [])
-        if not attachments:
-            logger.warning(f"{label} 没有附件")
-            continue
+        # 写表头
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = thin_border
+        ws.row_dimensions[1].height = 28
 
-        # 附件 PDF URL 在 urlOtherName 字段
-        pdf_rel_path = attachments[0].get("urlOtherName", "")
-        if not pdf_rel_path:
-            logger.warning(f"{label} 附件 URL 为空")
-            continue
+        # 写数据
+        for row_idx, record in enumerate(records, 2):
+            for col_idx, header in enumerate(headers, 1):
+                value = record.get(header, "")
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.font = data_font
+                cell.alignment = data_align
+                cell.border = thin_border
+            ws.row_dimensions[row_idx].height = 20
 
-        pdf_url = urljoin(NFRA_BASE_URL, pdf_rel_path)
-        logger.info(f"{label} PDF URL: {pdf_url}")
-        results.append((label, pdf_url))
+        # 列宽自适应
+        for col_idx, header in enumerate(headers, 1):
+            col_letter = get_column_letter(col_idx)
+            width = max(len(str(header)) * 2, 12)
+            ws.column_dimensions[col_letter].width = min(width, 50)
 
-    return results
+        # 冻结首行 + 自动筛选
+        ws.freeze_panes = "A2"
+        if len(records) > 0:
+            ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(records) + 1}"
+
+        logger.info(f"Sheet [{sheet_title}] 写入 {len(records)} 条记录")
+
+    wb.save(filepath)
+    logger.info(f"机构名录 Excel 已保存: {filepath}")
+    return filepath
 
 
 def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
-    """动态发现并下载 NFRA 银行保险法人名单 PDF 文件（不转 Excel）
-
-    通过 NFRA 内部 API 链动态发现最新 PDF 链接：
-      www.nfra.gov.cn → 政务信息 → 法定主动公开内容 → 机构监管 → 综合
-      → 找到「银行业金融机构法人名单」和「保险机构法人名单」PDF
-
-    Returns:
-        下载的 PDF 文件路径列表
     """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    从 NFRA 网站下载银行和保险机构法人名单 PDF 文件
 
-    # 动态发现 PDF 链接
-    discovered = _discover_nfra_pdf_urls()
+    流程：
+      1. 通过 NFRA 搜索接口，分别搜索"银行业金融机构法人名单"和"保险机构法人名单"
+      2. 获取对应公告详情页
+      3. 从详情页中提取 PDF 附件链接
+      4. 下载 PDF 到本地
 
-    # 如果动态发现失败，回退到静态备用 URL
-    if not discovered:
-        logger.warning("动态发现失败，使用静态备用 URL")
-        discovered = [
-            ("银行业金融机构法人名单", NFRA_BANK_PDF_URL_FALLBACK),
-            ("保险机构法人名单", NFRA_INSURANCE_PDF_URL_FALLBACK),
-        ]
+    参数：
+        output_dir: 输出目录
 
-    files = []
-    for label, url in discovered:
-        logger.info(f"正在下载 {label} PDF: {url}")
-        pdf_bytes = _download_file(url, timeout=120)
-        if not pdf_bytes:
-            logger.warning(f"下载失败: {label}")
-            continue
+    返回：
+        已下载的 PDF 文件路径列表
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    downloaded = []
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{label}_{timestamp}.pdf"
-        filepath = Path(output_dir) / filename
-        filepath.write_bytes(pdf_bytes)
-        logger.info(f"{label} PDF 已保存: {filepath} ({len(pdf_bytes)} bytes)")
-        files.append(str(filepath))
+    targets = [
+        (NFRA_BANK_KEYWORD, "银行业金融机构法人名单.pdf"),
+        (NFRA_INSURANCE_KEYWORD, "保险机构法人名单.pdf"),
+    ]
 
-    return files
+    for keyword, default_filename in targets:
+        try:
+            logger.info(f"正在搜索 NFRA: {keyword}")
+
+            # 搜索公告
+            detail_url = _fetch_nfra_search(keyword)
+            if not detail_url:
+                logger.warning(f"NFRA 搜索无结果: {keyword}")
+                continue
+
+            # 从详情页获取 PDF 链接
+            pdf_urls = _find_pdf_links_on_page(detail_url)
+            if not pdf_urls:
+                logger.warning(f"NFRA 详情页未找到 PDF 链接: {detail_url}")
+                continue
+
+            # 下载找到的 PDF（取第一个）
+            pdf_url = pdf_urls[0]
+            filename = pdf_url.split("/")[-1].split("?")[0]
+            if not filename.endswith(".pdf"):
+                filename = default_filename
+
+            filepath = _download_file(pdf_url, output_dir, filename)
+            if filepath:
+                downloaded.append(filepath)
+
+        except Exception as e:
+            logger.error(f"NFRA PDF 下载异常 [{keyword}]: {e}")
+
+    logger.info(f"NFRA PDF 下载完成，共 {len(downloaded)} 个文件")
+    return downloaded
 
 
 def download_csrc_to_combined_xlsx(output_dir: str = "output") -> str:
-    """下载 CSRC 证券/基金/期货公司名录附件，合并为一个 xlsx 文件
-
-    从 CSRC 页面找到附件链接（xlsx/xls），下载原始文件后合并到一个 xlsx：
-      - Sheet「证券公司名录」— 保留原始格式
-      - Sheet「基金管理公司名录」— 保留原始格式
-      - Sheet「期货公司名录」— 保留原始格式
-
-    Returns:
-        合并后的 xlsx 文件路径，失败返回空字符串
     """
-    from io import BytesIO
-    from openpyxl import Workbook
-    from openpyxl.utils import get_column_letter
+    从 CSRC 网站下载证券公司、基金公司、期货公司的 Excel 名录，
+    并合并为一个 xlsx 文件（每个机构类型一个 sheet）
 
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    流程：
+      1. 分别访问 CSRC 证券公司(c100028)、基金公司(c100029)、期货公司(c100030)页面
+      2. 从页面中提取 Excel 文件下载链接
+      3. 下载 Excel 文件
+      4. 合并到一个 xlsx 中，每个机构类型一个 sheet
 
-    sources = [
-        ("证券公司名录", CSRC_SECURITIES_URL),
-        ("基金管理公司名录", CSRC_FUND_URL),
-        ("期货公司名录", CSRC_FUTURES_URL),
+    参数：
+        output_dir: 输出目录
+
+    返回：
+        合并后的 xlsx 文件路径
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 需要下载的 CSRC 名录
+    csrc_targets = [
+        ("c100028", "证券公司"),
+        ("c100029", "基金公司"),
+        ("c100030", "期货公司"),
     ]
 
-    wb_out = Workbook()
-    # 删除默认的 Sheet
-    wb_out.remove(wb_out.active)
+    # 先下载各个 Excel 文件
+    downloaded_files: Dict[str, str] = {}  # {label: filepath}
 
-    for label, page_url in sources:
-        logger.info(f"正在获取 {label} 页面: {page_url}")
-        html = _fetch_html(page_url)
-        if not html:
-            logger.warning(f"无法访问 {label} 页面")
-            continue
+    for csrc_path, label in csrc_targets:
+        try:
+            logger.info(f"正在获取 CSRC {label} 名录...")
 
-        attachment_url = _find_xlsx_url(html, page_url)
-        if not attachment_url:
-            logger.warning(f"{label} 页面未找到附件链接")
-            continue
+            links = _find_excel_links_from_csrc(csrc_path)
+            if not links:
+                logger.warning(f"CSRC {label} 页面未找到 Excel 链接")
+                continue
 
-        logger.info(f"正在下载 {label}: {attachment_url}")
-        data = _download_file(attachment_url, timeout=120)
-        if not data:
-            logger.warning(f"下载 {label} 失败")
-            continue
+            # 下载第一个 Excel 文件
+            url, filename = links[0]
+            if not filename.endswith((".xls", ".xlsx")):
+                filename = f"{label}名录.xlsx"
 
-        ext = Path(attachment_url.split("?")[0]).suffix.lower()
-        if ext == ".xlsx":
-            _copy_xlsx_sheet(wb_out, data, label)
-        else:
-            _copy_xls_sheet(wb_out, data, label)
+            filepath = _download_csrc_excel(url, output_dir, filename)
+            if filepath:
+                downloaded_files[label] = filepath
 
-    if not wb_out.sheetnames:
-        logger.warning("没有成功下载任何名录")
-        return ""
+        except Exception as e:
+            logger.error(f"CSRC {label} 下载异常: {e}")
 
+    if not downloaded_files:
+        logger.warning("CSRC 未下载到任何文件，生成空合并文件")
+
+    # 合并为一个 xlsx
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"证券基金期货公司名录_{timestamp}.xlsx"
-    filepath = Path(output_dir) / filename
-    wb_out.save(str(filepath))
-    logger.info(f"合并名录已保存: {filepath}")
-    return str(filepath)
-
-
-def _copy_xlsx_sheet(wb_out, data: bytes, sheet_name: str):
-    """将 xlsx 文件的第一个 sheet 复制到目标 workbook，保留格式"""
-    from io import BytesIO
-    from openpyxl import load_workbook
-    from openpyxl.utils import get_column_letter
-    from copy import copy
-
-    wb_src = load_workbook(BytesIO(data))
-    ws_src = wb_src.active
-    ws_out = wb_out.create_sheet(title=sheet_name)
-
-    # 复制合并单元格
-    for merged_range in ws_src.merged_cells.ranges:
-        ws_out.merge_cells(str(merged_range))
-
-    # 复制行高和列宽
-    for row_idx in range(1, ws_src.max_row + 1):
-        if ws_src.row_dimensions[row_idx].height:
-            ws_out.row_dimensions[row_idx].height = ws_src.row_dimensions[row_idx].height
-    for col_idx in range(1, ws_src.max_column + 1):
-        col_letter = get_column_letter(col_idx)
-        if ws_src.column_dimensions[col_letter].width:
-            ws_out.column_dimensions[col_letter].width = ws_src.column_dimensions[col_letter].width
-
-    # 复制每个单元格的值和样式
-    # 只保留边框和对齐，不复制背景填充和字体颜色（避免绿色背景黄色文字）
-    for row in ws_src.iter_rows():
-        for cell in row:
-            new_cell = ws_out.cell(row=cell.row, column=cell.column, value=cell.value)
-            if cell.has_style:
-                new_cell.border = copy(cell.border)
-                new_cell.alignment = copy(cell.alignment)
-                new_cell.number_format = cell.number_format
-                # 不复制字体（默认白底黑字）
-                # 不复制背景填充（保持默认白色）
-
-    wb_src.close()
-    logger.info(f"已复制 {sheet_name}（xlsx，{ws_src.max_row} 行 × {ws_src.max_column} 列）")
-
-
-def _copy_xls_sheet(wb_out, data: bytes, sheet_name: str):
-    """将 xls 文件的第一个 sheet 数据写入目标 workbook"""
-    from io import BytesIO
-    import xlrd
-
-    wb_src = xlrd.open_workbook(file_contents=data)
-    ws_src = wb_src.sheet_by_index(0)
-    ws_out = wb_out.create_sheet(title=sheet_name)
-
-    for r in range(ws_src.nrows):
-        for c in range(ws_src.ncols):
-            cell_value = ws_src.cell_value(r, c)
-            ws_out.cell(row=r + 1, column=c + 1, value=cell_value if cell_value != "" else None)
-
-    logger.info(f"已复制 {sheet_name}（xls，{ws_src.nrows} 行 × {ws_src.ncols} 列）")
-
-
-def download_csrc_files(output_dir: str = "output") -> List[str]:
-    """直接下载 CSRC 证券/基金/期货公司名录附件文件（不转 Excel）
-
-    从 CSRC 页面找到附件链接（xlsx/xls），下载原始文件。
-
-    Returns:
-        下载的文件路径列表
-    """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    sources = [
-        ("证券公司名录", CSRC_SECURITIES_URL),
-        ("基金管理公司名录", CSRC_FUND_URL),
-        ("期货公司名录", CSRC_FUTURES_URL),
-    ]
-
-    files = []
-    for label, page_url in sources:
-        logger.info(f"正在获取 {label} 页面: {page_url}")
-        html = _fetch_html(page_url)
-        if not html:
-            logger.warning(f"无法访问 {label} 页面")
-            continue
-
-        # 查找附件链接（xlsx/xls）
-        attachment_url = _find_xlsx_url(html, page_url)
-        if not attachment_url:
-            logger.warning(f"{label} 页面未找到附件链接")
-            continue
-
-        logger.info(f"正在下载 {label}: {attachment_url}")
-        data = _download_file(attachment_url, timeout=120)
-        if not data:
-            logger.warning(f"下载 {label} 失败")
-            continue
-
-        # 保留原始文件扩展名
-        ext = Path(attachment_url.split("?")[0]).suffix or ".xlsx"
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{label}_{timestamp}{ext}"
-        filepath = Path(output_dir) / filename
-        filepath.write_bytes(data)
-        logger.info(f"{label} 已保存: {filepath} ({len(data)} bytes)")
-        files.append(str(filepath))
-
-    return files
-
-
-def fetch_bank_insurance_list() -> Dict[str, List[Dict]]:
-    """获取银行保险法人名单（通过 NFRA CDN PDF 直接下载）"""
-    result = {"bank": [], "insurance": []}
-
-    # ── 银行名单 ──
-    logger.info("正在获取银行业金融机构法人名单...")
-    pdf_bytes = _download_file(NFRA_BANK_PDF_URL_FALLBACK)
-    if pdf_bytes:
-        rows = _parse_pdf_table(pdf_bytes)
-        for row in rows:
-            if _is_header_row(row):
-                continue
-            if len(row) >= 2:
-                result["bank"].append({
-                    "name": row[1] if len(row) > 1 else row[0] if row else "",
-                    "code": row[3] if len(row) > 3 else "",
-                    "type": row[4] if len(row) > 4 else "",
-                })
-    logger.info(f"银行法人名单: {len(result['bank'])} 家")
-
-    # ── 保险名单 ──
-    logger.info("正在获取保险机构法人名单...")
-    pdf_bytes = _download_file(NFRA_INSURANCE_PDF_URL_FALLBACK)
-    if pdf_bytes:
-        rows = _parse_pdf_table(pdf_bytes)
-        for row in rows:
-            if _is_header_row(row):
-                continue
-            if len(row) >= 2:
-                result["insurance"].append({
-                    "name": row[1] if len(row) > 1 else row[0] if row else "",
-                    "code": row[3] if len(row) > 3 else "",
-                    "type": row[4] if len(row) > 4 else "",
-                })
-    logger.info(f"保险法人名单: {len(result['insurance'])} 家")
-    return result
-
-
-def fetch_securities_fund_list() -> Dict[str, List[Dict]]:
-    """获取证券基金期货公司名单"""
-    result = {"securities": [], "funds": [], "futures": []}
-
-    # 获取证券公司名录
-    logger.info("正在获取证券公司名录...")
-    html = _fetch_html(CSRC_SECURITIES_URL)
-    if html:
-        xlsx_url = _find_xlsx_url(html, CSRC_SECURITIES_URL)
-        if xlsx_url:
-            data = _download_file(xlsx_url)
-            if data:
-                rows = _parse_xlsx(data)
-                for row in rows:
-                    if _is_header_row(row, ["单位名称", "公司名称", "序号"]):
-                        continue
-                    if len(row) >= 2:
-                        result["securities"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if row else "",
-                            "addr": row[2] if len(row) > 2 else "",
-                        })
-        if not result["securities"]:
-            tables = _parse_html_table(html)
-            for chunk in _chunk_tables(tables):
-                for row in chunk[1:]:
-                    if len(row) >= 2 and not _is_header_row(row):
-                        result["securities"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if row else "",
-                            "addr": row[2] if len(row) > 2 else "",
-                        })
-    logger.info(f"证券公司名录: {len(result['securities'])} 家")
-
-    # 获取基金公司名录
-    logger.info("正在获取基金管理公司名录...")
-    html = _fetch_html(CSRC_FUND_URL)
-    if html:
-        xlsx_url = _find_xlsx_url(html, CSRC_FUND_URL)
-        if xlsx_url:
-            data = _download_file(xlsx_url)
-            if data:
-                rows = _parse_xlsx(data)
-                for row in rows:
-                    if _is_header_row(row, ["公司名称", "单位名称", "序号"]):
-                        continue
-                    if len(row) >= 2:
-                        result["funds"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if row else "",
-                            "addr": row[2] if len(row) > 2 else "",
-                        })
-        if not result["funds"]:
-            tables = _parse_html_table(html)
-            for chunk in _chunk_tables(tables):
-                for row in chunk[1:]:
-                    if len(row) >= 2 and not _is_header_row(row):
-                        result["funds"].append({
-                            "name": row[1] if len(row) > 1 else row[0] if row else "",
-                            "addr": row[2] if len(row) > 2 else "",
-                        })
-    logger.info(f"基金公司名录: {len(result['funds'])} 家")
-
-    # 获取期货公司名录
-    logger.info("正在获取期货公司名录...")
-    html = _fetch_html(CSRC_FUTURES_URL)
-    if html:
-        xlsx_url = _find_xlsx_url(html, CSRC_FUTURES_URL)
-        if xlsx_url:
-            data = _download_file(xlsx_url)
-            if data:
-                rows = _parse_xlsx(data)
-                for row in rows:
-                    if _is_header_row(row, ["期货公司名称", "序号", "辖区"], name_col_index=2):
-                        continue
-                    if len(row) >= 2:
-                        # 期货公司表格：序号 | 辖区 | 期货公司名称
-                        name = row[2] if len(row) > 2 else row[1] if len(row) > 1 else ""
-                        result["futures"].append({
-                            "name": name,
-                            "region": row[1] if len(row) > 1 else "",
-                        })
-        if not result["futures"]:
-            tables = _parse_html_table(html)
-            for row in tables[1:]:
-                if not _is_header_row(row, ["期货公司名称", "序号", "辖区"], name_col_index=2):
-                    if len(row) >= 2:
-                        name = row[2] if len(row) > 2 else row[1] if len(row) > 1 else ""
-                        region = row[1] if len(row) > 1 else ""
-                        result["futures"].append({"name": name, "region": region})
-    logger.info(f"期货公司名录: {len(result['futures'])} 家")
-    return result
-
-
-def fetch_all_institution_lists() -> Dict[str, List[Dict]]:
-    """获取所有法人名单"""
-    bank_insurance = fetch_bank_insurance_list()
-    sec_fund = fetch_securities_fund_list()
-
-    return {
-        "bank": bank_insurance["bank"],
-        "insurance": bank_insurance["insurance"],
-        "securities": sec_fund["securities"],
-        "funds": sec_fund["funds"],
-        "futures": sec_fund["futures"],
-    }
-
-
-def write_institution_excel(
-    data: Dict[str, List[Dict]],
-    output_dir: str = "output",
-    prefix: str = "金融机构法人名录",
-) -> str:
-    """将法人名单写入Excel文件"""
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    combined_path = os.path.join(output_dir, f"CSRC机构名录_合并_{timestamp}.xlsx")
 
     wb = Workbook()
-    hf = Font(name="微软雅黑", bold=True, size=11, color="FFFFFF")
-    hfill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-    cf = Font(name="微软雅黑", size=10)
-    align = Alignment(wrap_text=True, vertical="top")
-    border = Border(
-        left=Side(style="thin"), right=Side(style="thin"),
-        top=Side(style="thin"), bottom=Side(style="thin"),
+    wb.remove(wb.active)
+
+    for label, src_path in downloaded_files.items():
+        try:
+            # 尝试读取下载的 Excel 文件
+            from openpyxl import load_workbook
+
+            if not os.path.exists(src_path):
+                logger.warning(f"CSRC 文件不存在: {src_path}")
+                continue
+
+            src_wb = load_workbook(src_path, read_only=True, data_only=True)
+
+            for src_ws in src_wb.worksheets:
+                # Sheet 名称
+                sheet_title = f"{label}_{src_ws.title}"[:31]
+                dst_ws = wb.create_sheet(title=sheet_title)
+
+                # 复制数据
+                for row in src_ws.iter_rows(values_only=True):
+                    dst_ws.append(list(row))
+
+                logger.info(f"合并 sheet [{sheet_title}]: {dst_ws.max_row} 行")
+
+            src_wb.close()
+
+        except Exception as e:
+            logger.error(f"合并 CSRC {label} 文件失败: {e}")
+            # 创建占位 sheet
+            ws = wb.create_sheet(title=f"{label}(合并失败)"[:31])
+            ws.cell(row=1, column=1, value=f"合并失败: {e}")
+
+    # 如果没有任何 sheet，创建一个占位 sheet
+    if len(wb.worksheets) == 0:
+        ws = wb.create_sheet(title="暂无数据")
+        ws.cell(row=1, column=1, value="未获取到 CSRC 机构名录数据")
+
+    wb.save(combined_path)
+    logger.info(f"CSRC 合并 Excel 已保存: {combined_path}")
+    return combined_path
+
+
+# ==================== 模块自测 ====================
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
     )
 
-    def _write_sheet(ws, title, headers, rows_data):
-        ws.title = title
-        for col, h in enumerate(headers, 1):
-            c = ws.cell(row=1, column=col, value=h)
-            c.font = hf
-            c.fill = hfill
-            c.alignment = Alignment(horizontal="center", vertical="center")
-            c.border = border
-        for i, row in enumerate(rows_data, 1):
-            for col, val in enumerate(row, 1):
-                c = ws.cell(row=i + 1, column=col, value=val)
-                c.font = cf
-                c.alignment = align
-                c.border = border
+    print("=" * 60)
+    print("  金融机构名录爬取工具 - 自测")
+    print("=" * 60)
 
-    # 根据提供的数据类型写入不同Sheet
-    sheet_specs = [
-        ("bank", "银行法人名单", ["序号", "机构名称", "机构编码", "机构类型"]),
-        ("insurance", "保险法人名单", ["序号", "机构名称", "机构编码", "机构类型"]),
-        ("securities", "证券公司名单", ["序号", "公司名称", "地址"]),
-        ("funds", "基金公司名单", ["序号", "公司名称", "地址"]),
-        ("futures", "期货公司名单", ["序号", "辖区", "期货公司名称"]),
-    ]
+    # 测试 1: 获取所有机构名录
+    print("\n[1] 获取所有机构名录...")
+    data = fetch_all_institution_lists()
+    for key, records in data.items():
+        print(f"  - {key}: {len(records)} 条记录")
 
-    first = True
-    for key, title, headers in sheet_specs:
-        items = data.get(key, [])
-        if not items:
-            continue
-        if first:
-            ws = wb.active
-            first = False
-        else:
-            ws = wb.create_sheet()
+    # 测试 2: 写入 Excel
+    print("\n[2] 写入机构名录 Excel...")
+    excel_path = write_institution_excel(data, output_dir="output")
+    print(f"  已保存: {excel_path}")
 
-        rows_data = []
-        for i, item in enumerate(items, 1):
-            if key == "securities":
-                rows_data.append([i, item.get("name", ""), item.get("addr", "")])
-            elif key == "funds":
-                rows_data.append([i, item.get("name", ""), item.get("addr", "")])
-            elif key == "futures":
-                rows_data.append([i, item.get("region", ""), item.get("name", "")])
-            else:
-                rows_data.append([i, item.get("name", ""), item.get("code", ""), item.get("type", "")])
+    # 测试 3: 下载 NFRA PDF
+    print("\n[3] 下载 NFRA PDF...")
+    pdf_paths = download_nfra_pdfs(output_dir="output")
+    for p in pdf_paths:
+        print(f"  已下载: {p}")
 
-        _write_sheet(ws, title, headers, rows_data)
+    # 测试 4: 下载并合并 CSRC Excel
+    print("\n[4] 下载并合并 CSRC Excel...")
+    csrc_path = download_csrc_to_combined_xlsx(output_dir="output")
+    print(f"  已保存: {csrc_path}")
 
-        # 列宽
-        ws.column_dimensions["A"].width = 6
-        ws.column_dimensions["B"].width = 40
-        if key in ("bank", "insurance"):
-            ws.column_dimensions["C"].width = 20
-            ws.column_dimensions["D"].width = 18
-        elif key in ("securities", "funds"):
-            ws.column_dimensions["C"].width = 50
-        elif key == "futures":
-            ws.column_dimensions["C"].width = 40
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{prefix}_{timestamp}.xlsx"
-    filepath = str(Path(output_dir) / filename)
-    wb.save(filepath)
-    logger.info(f"法人名录Excel已保存: {filepath}")
-    return filepath
+    print("\n" + "=" * 60)
+    print("  自测完成")
+    print("=" * 60)

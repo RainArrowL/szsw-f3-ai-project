@@ -34,8 +34,8 @@ NFRA_NATIONAL_STATS_ITEM_ID = "954"
 
 # ── CSRC 统计信息 ───────────────────────────────────
 CSRC_SECURITIES_MONTHLY_URL = "http://www.csrc.gov.cn/csrc/c100120/c7636492/content.shtml"
-CSRC_FUTURES_MONTHLY_URL = "http://www.csrc.gov.cn/csrc/c100120/c7636494/content.shtml"
-CSRC_SHENZHEN_URL = "http://www.csrc.gov.cn/shenzhen/index.shtml"
+CSRC_FUTURES_MONTHLY_URL = "http://www.csrc.gov.cn/csrc/c100120/c7636490/content.shtml"
+CSRC_SHENZHEN_MARKET_DATA_URL = "http://www.csrc.gov.cn/shenzhen/c104327/zfxxgk_zdgk.shtml?channelid=da7d796c357945aea2a215a9a2f657a5"
 
 
 def _fetch_html(url: str, timeout: int = 30) -> Optional[str]:
@@ -52,7 +52,8 @@ def _fetch_html(url: str, timeout: int = 30) -> Optional[str]:
 
 def _fetch_json(url: str, timeout: int = 30) -> Optional[dict]:
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=timeout)
+        json_headers = {**HEADERS, "Accept": "application/json, text/javascript, */*; q=0.01"}
+        resp = requests.get(url, headers=json_headers, timeout=timeout)
         resp.encoding = "utf-8"
         if resp.status_code == 200:
             return resp.json()
@@ -76,7 +77,7 @@ def _download_file(url: str, timeout: int = 120) -> Optional[bytes]:
 def _find_xlsx_urls(html: str, base_url: str) -> List[str]:
     """从HTML页面中查找所有附件xlsx/xls链接"""
     urls = []
-    for pattern in [r'href="([^"]+\.xlsx)"', r'href="([^"]+\.xls)"']:
+    for pattern in [r'href="([^"]+\.(?:xlsx|xls|xlsb))"', r'href="([^"]+\.(?:docx|doc)[^"]*)"']:
         for match in re.finditer(pattern, html, re.IGNORECASE):
             urls.append(urljoin(base_url, match.group(1)))
     return urls
@@ -145,7 +146,7 @@ def _download_nfra_stats(item_id: str, item_name: str) -> List[Tuple[str, bytes]
         attachments = _extract_attachment_urls(detail)
         for name, url in attachments:
             ext = Path(url.split("?")[0]).suffix.lower()
-            if ext in (".xlsx", ".xls"):
+            if ext in (".xlsx", ".xls", ".docx", ".doc"):
                 logger.info(f"  下载: {title} - {name}")
                 file_bytes = _download_file(url, timeout=120)
                 if file_bytes:
@@ -178,7 +179,7 @@ def _download_csrc_page_stats(page_url: str, page_name: str) -> List[Tuple[str, 
 
 
 def download_all_stats(output_dir: str = "output") -> str:
-    """下载所有4个网址的统计数据，合并为一个Excel文件
+    """下载所有统计信息，合并为一个Excel文件
 
     Returns:
         合并后的xlsx文件路径，失败返回空字符串
@@ -219,7 +220,7 @@ def download_all_stats(output_dir: str = "output") -> str:
     # 5. CSRC深圳局市场数据
     logger.info("=" * 50)
     logger.info("5/5: CSRC深圳局市场数据")
-    sz_csrc_files = _download_csrc_page_stats(CSRC_SHENZHEN_URL, "深圳局市场数据")
+    sz_csrc_files = _download_csrc_page_stats(CSRC_SHENZHEN_MARKET_DATA_URL, "深圳局市场数据")
     all_files.extend(sz_csrc_files)
 
     if not all_files:
@@ -232,9 +233,9 @@ def download_all_stats(output_dir: str = "output") -> str:
 
     for name, data in all_files:
         try:
-            ext = name.split(".")[-1].lower() if "." in name else ".xlsx"
+            ext = name.split(".")[-1].lower() if "." in name else "xlsx"
 
-            if ext == ".xlsx":
+            if ext == "xlsx":
                 from openpyxl import load_workbook
 
                 wb_src = load_workbook(BytesIO(data), read_only=True, data_only=True)
@@ -243,29 +244,16 @@ def download_all_stats(output_dir: str = "output") -> str:
                 sheet_name = name.replace(".xlsx", "")[:31]
                 ws_out = wb_out.create_sheet(title=sheet_name)
 
-                for merged_range in ws_src.merged_cells.ranges:
-                    ws_out.merge_cells(str(merged_range))
-
                 for row_idx in range(1, ws_src.max_row + 1):
-                    if ws_src.row_dimensions[row_idx].height:
-                        ws_out.row_dimensions[row_idx].height = ws_src.row_dimensions[row_idx].height
-                for col_idx in range(1, ws_src.max_column + 1):
-                    col_letter = get_column_letter(col_idx)
-                    if ws_src.column_dimensions[col_letter].width:
-                        ws_out.column_dimensions[col_letter].width = ws_src.column_dimensions[col_letter].width
-
-                for row in ws_src.iter_rows():
-                    for cell in row:
-                        new_cell = ws_out.cell(row=cell.row, column=cell.column, value=cell.value)
-                        if cell.has_style:
-                            new_cell.border = copy(cell.border)
-                            new_cell.alignment = copy(cell.alignment)
-                            new_cell.number_format = cell.number_format
+                    for col_idx in range(1, ws_src.max_column + 1):
+                        cell = ws_src.cell(row=row_idx, column=col_idx)
+                        if cell.value is not None:
+                            ws_out.cell(row=row_idx, column=col_idx, value=cell.value)
 
                 wb_src.close()
                 logger.info(f"已合并: {sheet_name} ({ws_src.max_row}行)")
 
-            elif ext == ".xls":
+            elif ext == "xls":
                 import xlrd
 
                 wb_src = xlrd.open_workbook(file_contents=data)
@@ -280,6 +268,34 @@ def download_all_stats(output_dir: str = "output") -> str:
                         ws_out.cell(row=r + 1, column=c + 1, value=cell_value if cell_value != "" else None)
 
                 logger.info(f"已合并: {sheet_name} ({ws_src.nrows}行)")
+
+            elif ext in ("docx", "doc"):
+                sheet_name = name.rsplit(".", 1)[0][:31]
+                try:
+                    from docx import Document
+                    doc = Document(BytesIO(data))
+                    ws_out = wb_out.create_sheet(title=sheet_name)
+
+                    row_idx = 1
+                    for para in doc.paragraphs:
+                        text = para.text.strip()
+                        if text:
+                            ws_out.cell(row=row_idx, column=1, value=text)
+                            row_idx += 1
+
+                    for table in doc.tables:
+                        for i, row in enumerate(table.rows):
+                            for j, cell in enumerate(row.cells):
+                                ws_out.cell(row=row_idx + i, column=j + 1, value=cell.text.strip())
+                        row_idx += len(table.rows)
+
+                    logger.info(f"已合并: {sheet_name} ({row_idx - 1}行)")
+                except Exception:
+                    # python-docx 不支持旧格式 .doc，保存提示
+                    ws_out = wb_out.create_sheet(title=sheet_name)
+                    ws_out.cell(row=1, column=1, value=f"无法解析旧格式 .doc 文件: {name}")
+                    ws_out.cell(row=2, column=1, value=f"文件大小: {len(data)} bytes")
+                    logger.info(f"已添加提示Sheet: {sheet_name} (旧格式 .doc，无法解析)")
 
         except Exception as e:
             logger.warning(f"合并文件失败 {name}: {e}")
