@@ -11,12 +11,10 @@
 </head>
 <body>
     <div class="bg-particles" id="particles"></div>
-
     <div class="app">
-        <!-- 顶部 -->
         <header class="header">
             <div class="header-left">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <rect x="3" y="3" width="18" height="18" rx="2"/>
                     <line x1="3" y1="9" x2="21" y2="9"/>
                     <line x1="9" y1="21" x2="9" y2="9"/>
@@ -28,46 +26,53 @@
         </header>
 
         <div class="main">
-            <!-- 左侧导航 -->
             <nav class="sidebar">
                 <div class="nav-section">
                     <div class="nav-label">功能模块</div>
                     <button class="nav-item active" data-module="annual">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
-                        </svg>
+                        <div class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
+                            </svg>
+                        </div>
                         <span>年报数据爬取</span>
                     </button>
                     <button class="nav-item" data-module="institutions">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                        </svg>
+                        <div class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                            </svg>
+                        </div>
                         <span>机构法人名录</span>
                     </button>
                     <button class="nav-item" data-module="szse">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-                        </svg>
+                        <div class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                            </svg>
+                        </div>
                         <span>深交所日度概况</span>
                     </button>
                     <button class="nav-item" data-module="dividend">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-                        </svg>
+                        <div class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                            </svg>
+                        </div>
                         <span>分红公告查询</span>
                     </button>
                     <button class="nav-item" data-module="external">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                        </svg>
+                        <div class="nav-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                            </svg>
+                        </div>
                         <span>外部信息获取</span>
                     </button>
                 </div>
             </nav>
 
-            <!-- 右侧内容区 -->
             <div class="content">
-                <!-- 表单区域 -->
                 <div class="form-area" id="formArea">
                     <!-- ===== 年报数据 ===== -->
                     <div class="form-panel active" id="form-annual">
@@ -76,9 +81,13 @@
                                 <div class="form-group">
                                     <label class="mini-label">年度范围</label>
                                     <div class="year-range-compact">
-                                        <select id="startYear" required><option value="">--</option></select>
+                                        <div class="custom-select-wrap">
+                                            <select id="startYear" required><option value="">--</option></select>
+                                        </div>
                                         <span class="dash">&mdash;</span>
-                                        <select id="endYear" required><option value="">--</option></select>
+                                        <div class="custom-select-wrap">
+                                            <select id="endYear" required><option value="">--</option></select>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="form-group">
@@ -98,7 +107,10 @@
                                     <label class="mini-label">或上传文件</label>
                                     <div class="upload-area" id="uploadArea">
                                         <input type="file" id="fileInput" accept=".txt,.csv">
-                                        <div class="upload-content"><span>拖拽 .txt/.csv 文件到此处</span></div>
+                                        <div class="upload-content">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                            <span>拖拽 .txt / .csv 文件</span>
+                                        </div>
                                         <div class="file-info" id="fileInfo" style="display:none;">
                                             <span class="file-name" id="fileName"></span>
                                             <button type="button" class="file-remove" id="fileRemove">&times;</button>
@@ -107,8 +119,20 @@
                                 </div>
                             </div>
                             <div class="form-actions">
-                                <label class="toggle-inline"><input type="checkbox" id="industryAvgToggle"> 同行业均值</label>
-                                <label class="toggle-inline"><input type="checkbox" id="mergeReportsToggle"> 按报表合并</label>
+                                <label class="toggle-inline">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="industryAvgToggle">
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">同行业均值</span>
+                                </label>
+                                <label class="toggle-inline">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="mergeReportsToggle">
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">按报表合并</span>
+                                </label>
                                 <button type="submit" class="btn-primary" id="annualSubmitBtn">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                     开始获取
@@ -121,10 +145,28 @@
                     <!-- ===== 机构名录 ===== -->
                     <div class="form-panel" id="form-institutions">
                         <form id="institutionsForm" class="module-form">
-                            <div class="checkbox-row">
-                                <label class="checkbox-item"><input type="checkbox" id="bank_insurance" checked> 银行保险法人名单</label>
-                                <label class="checkbox-item"><input type="checkbox" id="securities_fund" checked> 证券基金期货名录</label>
-                                <label class="checkbox-item"><input type="checkbox" id="amac" checked> 公募基金管理人名录</label>
+                            <div class="toggle-row">
+                                <label class="toggle-inline-vertical">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="bank_insurance" checked>
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">银行保险法人名单</span>
+                                </label>
+                                <label class="toggle-inline-vertical">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="securities_fund" checked>
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">证券基金期货名录</span>
+                                </label>
+                                <label class="toggle-inline-vertical">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="amac" checked>
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">公募基金管理人名录</span>
+                                </label>
                             </div>
                             <div class="form-actions">
                                 <button type="submit" class="btn-primary" id="institutionsSubmitBtn">
@@ -141,7 +183,9 @@
                             <div class="form-row-inline">
                                 <div class="form-group">
                                     <label class="mini-label">年度选择</label>
-                                    <select id="szseYear" class="year-select-single"><option value="">--</option></select>
+                                    <div class="custom-select-wrap" style="width:140px;">
+                                        <select id="szseYear"><option value="">--</option></select>
+                                    </div>
                                 </div>
                             </div>
                             <div class="form-actions">
@@ -160,9 +204,13 @@
                                 <div class="form-group">
                                     <label class="mini-label">年度范围</label>
                                     <div class="year-range-compact">
-                                        <select id="dividendStartYear" required><option value="">--</option></select>
+                                        <div class="custom-select-wrap">
+                                            <select id="dividendStartYear" required><option value="">--</option></select>
+                                        </div>
                                         <span class="dash">&mdash;</span>
-                                        <select id="dividendEndYear" required><option value="">--</option></select>
+                                        <div class="custom-select-wrap">
+                                            <select id="dividendEndYear" required><option value="">--</option></select>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="form-group">
@@ -182,7 +230,10 @@
                                     <label class="mini-label">或上传文件</label>
                                     <div class="upload-area" id="dividendUploadArea">
                                         <input type="file" id="dividendFileInput" accept=".txt,.csv">
-                                        <div class="upload-content"><span>拖拽 .txt/.csv 文件到此处</span></div>
+                                        <div class="upload-content">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                            <span>拖拽 .txt / .csv 文件</span>
+                                        </div>
                                         <div class="file-info" id="dividendFileInfo" style="display:none;">
                                             <span class="file-name" id="dividendFileName"></span>
                                             <button type="button" class="file-remove" id="dividendFileRemove">&times;</button>
@@ -202,9 +253,21 @@
                     <!-- ===== 外部信息 ===== -->
                     <div class="form-panel" id="form-external">
                         <form id="externalForm" class="module-form">
-                            <div class="checkbox-row">
-                                <label class="checkbox-item"><input type="checkbox" id="extPenalty" checked> 处罚信息</label>
-                                <label class="checkbox-item"><input type="checkbox" id="extStats"> 统计信息</label>
+                            <div class="toggle-row">
+                                <label class="toggle-inline-vertical">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="extPenalty" checked>
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">处罚信息</span>
+                                </label>
+                                <label class="toggle-inline-vertical">
+                                    <span class="toggle-switch">
+                                        <input type="checkbox" id="extStats">
+                                        <span class="toggle-slider"></span>
+                                    </span>
+                                    <span class="toggle-label-text">统计信息</span>
+                                </label>
                             </div>
                             <div class="form-actions">
                                 <button type="submit" class="btn-primary" id="externalSubmitBtn">
@@ -216,7 +279,6 @@
                     </div>
                 </div>
 
-                <!-- 结果面板 -->
                 <div class="results-panel" id="resultsPanel">
                     <div class="results-placeholder">
                         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
@@ -228,7 +290,6 @@
             </div>
         </div>
     </div>
-
     <script src="/static/js/script.js"></script>
 </body>
 </html>
