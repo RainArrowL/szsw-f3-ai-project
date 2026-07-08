@@ -714,6 +714,26 @@ class FinancialDataFetcher:
             logger.info(f"正在获取 {stock_code or org_id} 的{cn_name}数据...")
 
             try:
+                # 优先使用新浪财经（免费，科目完整，字段名已是中文）
+                if not is_non_listed:
+                    try:
+                        records = self.api.fetch_from_sina(
+                            stock_code, report_type, start_year, end_year
+                        )
+                        if records:
+                            # 新浪财经字段名已是中文，直接通过 _translate_fields 做数值转换
+                            translated = self._translate_fields(
+                                records, report_type, is_eastmoney=False
+                            )
+                            result[cn_name] = translated
+                            time.sleep(0.5)
+                            continue
+                    except Exception as e:
+                        logger.warning(
+                            f"新浪财经获取{cn_name}失败({e})，切换到cninfo API..."
+                        )
+
+                # 回退到cninfo API
                 if self._use_cninfo:
                     try:
                         records = self.api.fetch_financial_report(
@@ -728,7 +748,7 @@ class FinancialDataFetcher:
                         continue
                     except Exception as e:
                         logger.warning(
-                            f"cninfo API获取{cn_name}失败({e})，切换到新浪财经..."
+                            f"cninfo API获取{cn_name}失败({e})，切换到东方财富..."
                         )
 
                 # 非上市公司没有免费数据源，跳过
@@ -736,24 +756,6 @@ class FinancialDataFetcher:
                     logger.warning(f"非上市公司 {org_id} 无法回退到免费数据源")
                     result[cn_name] = []
                     continue
-
-                # 回退到新浪财经（免费，科目完整）
-                try:
-                    records = self.api.fetch_from_sina(
-                        stock_code, report_type, start_year, end_year
-                    )
-                    if records:
-                        # 新浪财经字段名已是中文，直接通过 _translate_fields 做数值转换
-                        translated = self._translate_fields(
-                            records, report_type, is_eastmoney=False
-                        )
-                        result[cn_name] = translated
-                        time.sleep(0.5)
-                        continue
-                except Exception as e:
-                    logger.warning(
-                        f"新浪财经获取{cn_name}失败({e})，切换到东方财富..."
-                    )
 
                 # 最后回退到东方财富免费数据源
                 records = self.api.fetch_from_eastmoney(
