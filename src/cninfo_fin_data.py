@@ -714,56 +714,44 @@ class FinancialDataFetcher:
             logger.info(f"正在获取 {stock_code or org_id} 的{cn_name}数据...")
 
             try:
-                # 策略：合并新浪财经（科目完整，但只返回最近5期） + 东方财富（补充历史年份）
+                # 策略：AKShare（同花顺，全历史完整科目） > 新浪财经 > 东方财富
                 all_translated = []
-                got_years = set()
 
                 if not is_non_listed:
+                    # 1. 优先使用 AKShare（同花顺数据源，全历史年份 + 完整科目）
+                    try:
+                        records = self.api.fetch_from_akshare(
+                            stock_code, report_type, start_year, end_year
+                        )
+                        if records:
+                            # AKShare 字段名已是中文，数值统一为元
+                            translated = self._translate_fields(
+                                records, report_type, is_eastmoney=False
+                            )
+                            all_translated = translated
+                            logger.info(f"AKShare 获取 {cn_name}: {len(translated)} 条")
+                    except Exception as e:
+                        logger.warning(
+                            f"AKShare 获取{cn_name}失败({e})，回退到新浪财经..."
+                        )
+
+                # 2. AKShare 失败或无数据时，回退到新浪财经
+                if not all_translated and not is_non_listed:
                     try:
                         records = self.api.fetch_from_sina(
                             stock_code, report_type, start_year, end_year
                         )
                         if records:
-                            translated_sina = self._translate_fields(
+                            translated = self._translate_fields(
                                 records, report_type, is_eastmoney=False
                             )
-                            # 记录已经获取到的年份
-                            for rec in translated_sina:
-                                report_date = rec.get("报告期", "")
-                                if report_date:
-                                    try:
-                                        year = int(str(report_date)[:4])
-                                        if start_year <= year <= end_year:
-                                            got_years.add(year)
-                                    except (ValueError, TypeError):
-                                        pass
-                            all_translated.extend(translated_sina)
-                            logger.info(f"新浪财经获取到 {len(got_years)} 年数据，还需补充...")
+                            all_translated = translated
                     except Exception as e:
                         logger.warning(
-                            f"新浪财经获取{cn_name}失败({e})，尝试合并补充..."
+                            f"新浪财经获取{cn_name}失败({e})，回退到东方财富..."
                         )
 
-                # 如果新浪财经没有覆盖全部年份，用东方财富补充缺失年份
-                # 遍历所有需要的年份，如果某年份没有数据，尝试从东方财富获取补充
-                missing_years = [y for y in range(start_year, end_year + 1) if y not in got_years]
-                if missing_years and not is_non_listed:
-                    logger.info(f"东方财富补充 {cn_name} 缺失年份: {missing_years}")
-                    try:
-                        for missing_year in missing_years:
-                            records_em = self.api.fetch_from_eastmoney(
-                                stock_code, report_type, missing_year, missing_year
-                            )
-                            if records_em:
-                                translated_em = self._translate_fields(
-                                    records_em, report_type, is_eastmoney=True
-                                )
-                                all_translated.extend(translated_em)
-                            time.sleep(0.3)
-                    except Exception as e:
-                        logger.warning(f"东方财富补充失败: {e}")
-
-                # 如果仍然没有数据，尝试回退到 cninfo API
+                # 3. 回退到 cninfo API
                 if not all_translated and self._use_cninfo:
                     try:
                         records = self.api.fetch_financial_report(
@@ -773,12 +761,25 @@ class FinancialDataFetcher:
                         translated = self._translate_fields(
                             records, report_type, is_eastmoney=False
                         )
-                        all_translated.extend(translated)
+                        all_translated = translated
                         time.sleep(0.5)
                     except Exception as e:
                         logger.warning(
                             f"cninfo API获取{cn_name}失败({e})..."
                         )
+
+                # 4. 最后回退到东方财富
+                if not all_translated and not is_non_listed:
+                    try:
+                        records = self.api.fetch_from_eastmoney(
+                            stock_code, report_type, start_year, end_year
+                        )
+                        translated = self._translate_fields(
+                            records, report_type, is_eastmoney=True
+                        )
+                        all_translated = translated
+                    except Exception as e:
+                        logger.warning(f"东方财富获取{cn_name}失败({e})")
 
                 # 非上市公司没有免费数据源，跳过
                 if not all_translated and is_non_listed:
@@ -786,20 +787,10 @@ class FinancialDataFetcher:
                     result[cn_name] = []
                     continue
 
-                # 对最终数据去重（按报告期），保留最新的一份
-                seen_dates = {}
-                final_records = []
-                for rec in all_translated:
-                    report_date = rec.get("报告期", "")
-                    if report_date:
-                        if report_date not in seen_dates:
-                            seen_dates[report_date] = rec
-                            final_records.append(rec)
                 # 按日期排序（旧→新）
-                final_records.sort(key=lambda x: x.get("报告期", ""))
-
-                result[cn_name] = final_records
-                logger.info(f"{cn_name} 最终共 {len(final_records)} 条记录")
+                all_translated.sort(key=lambda x: x.get("报告期", ""))
+                result[cn_name] = all_translated
+                logger.info(f"{cn_name} 最终共 {len(all_translated)} 条记录")
 
             except Exception as e:
                 logger.error(f"获取{stock_code or org_id} {cn_name}失败: {e}")

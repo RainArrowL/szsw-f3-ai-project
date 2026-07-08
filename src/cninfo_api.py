@@ -10,6 +10,7 @@ import json
 import hashlib
 import logging
 import requests
+import pandas as pd
 from typing import Dict, List, Optional, Any
 from config import config
 
@@ -464,6 +465,131 @@ class CninfoAPI:
 
         except Exception as e:
             logger.warning(f"新浪财经数据获取失败({stock_code} {report_type}): {e}")
+            return []
+
+    # ==================== AKShare 数据源（同花顺，全历史完整科目） ====================
+
+    def fetch_from_akshare(
+        self,
+        stock_code: str,
+        report_type: str,
+        start_year: int,
+        end_year: int,
+    ) -> List[Dict[str, Any]]:
+        """从 AKShare 获取同花顺财务报表数据（全历史，科目完整）
+
+        参数:
+            stock_code: 股票代码
+            report_type: 报表类型 (balance/income/cashflow)
+            start_year: 开始年份
+            end_year: 截止年份
+        """
+        import akshare as ak
+
+        # 映射报表类型到对应的 AKShare 函数
+        func_map = {
+            "balance": ak.stock_financial_debt_ths,
+            "income": ak.stock_financial_benefit_ths,
+            "cashflow": ak.stock_financial_cash_ths,
+        }
+        func = func_map.get(report_type)
+        if not func:
+            raise ValueError(f"不支持的报表类型: {report_type}")
+
+        try:
+            # AKShare 接口：按年度获取
+            df = func(symbol=stock_code, indicator="按年度")
+            if df is None or df.empty:
+                logger.warning(f"AKShare 返回空数据: {stock_code} {report_type}")
+                return []
+
+            # 将 DataFrame 转换为字典列表
+            records = []
+            for _, row in df.iterrows():
+                report_date = str(row.get("报告期", ""))
+                if not report_date:
+                    continue
+
+                # 提取年份
+                try:
+                    year = int(report_date[:4])
+                except (ValueError, TypeError):
+                    continue
+
+                if not (start_year <= year <= end_year):
+                    continue
+
+                # 转换数值，处理单位（AKShare 返回的是亿单位，需要转换为元）
+                # 比如 "2737.91亿" → 2737.91 * 10^8 = 273791000000 元
+                record = {"报告期": f"{year}-12-31"}
+                for col_name, value in row.items():
+                    if col_name == "报告期" or pd.isna(value) or value is False:
+                        continue
+
+                    # AKShare 的 False 表示空值
+                    if value is False:
+                        continue
+
+                    # 如果是字符串带"亿"，解析为数值
+                    if isinstance(value, str):
+                        value = value.strip()
+                        if value.endswith("万亿"):
+                            try:
+                                num = float(value[:-2]) * 1000000000000
+                                record[col_name] = num
+                            except (ValueError, TypeError):
+                                continue
+                        elif value.endswith("亿"):
+                            try:
+                                num = float(value[:-1]) * 100000000
+                                record[col_name] = num
+                            except (ValueError, TypeError):
+                                continue
+                        elif value.endswith("万"):
+                            try:
+                                num = float(value[:-1]) * 10000
+                                record[col_name] = num
+                            except (ValueError, TypeError):
+                                continue
+                        else:
+                            try:
+                                # 尝试直接转浮点数
+                                num = float(value)
+                                # 如果数值特别小（单位已经是元了），不做调整
+                                # AKShare 已经处理了单位，但是我们需要统一单位为元
+                                if 0 < abs(num) < 1000 and ("率" in col_name or "%" in col_name):
+                                    # 百分比，直接保留
+                                    record[col_name] = num
+                                else:
+                                    # 已经是正确单位，直接赋值
+                                    record[col_name] = num
+                            except (ValueError, TypeError):
+                                continue
+                    else:
+                        # 已经是数值类型
+                        if isinstance(value, (int, float)):
+                            if 0 < abs(value) < 1000 and ("率" in col_name or "%" in col_name):
+                                record[col_name] = value
+                            else:
+                                # AKShare 同花顺接口返回的数值单位是亿
+                                # 需要转换为元
+                                if value != 0:
+                                    record[col_name] = value * 100000000
+                                else:
+                                    record[col_name] = 0
+
+                if len(record) > 1:  # 至少有报告期加一个字段
+                    records.append(record)
+
+            # 按年份排序
+            records.sort(key=lambda x: x.get("报告期", ""))
+            logger.info(f"AKShare 获取 {stock_code} {report_type}: {len(records)} 条（年份范围 {start_year}-{end_year}）")
+            return records
+
+        except Exception as e:
+            logger.warning(f"AKShare 数据获取失败({stock_code} {report_type}): {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
             return []
 
     # ==================== 分红数据 ====================
