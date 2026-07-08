@@ -100,13 +100,13 @@ let currentModule = 'annual';
 
 function switchModule(name) {
     currentModule = name;
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.querySelector(`.nav-item[data-module="${name}"]`).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(n => n.classList.remove('active'));
+    document.querySelector(`.tab-btn[data-module="${name}"]`).classList.add('active');
     document.querySelectorAll('.form-panel').forEach(p => p.classList.remove('active'));
     document.getElementById(`form-${name}`).classList.add('active');
 }
 
-document.querySelectorAll('.nav-item').forEach(btn => {
+document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchModule(btn.dataset.module));
 });
 
