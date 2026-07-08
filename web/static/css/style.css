@@ -160,6 +160,7 @@ body {
 }
 
 .form-actions {
+    order: -1;
     display: flex; align-items: center; gap: 10px;
     padding-bottom: 14px;
     border-bottom: 1px solid var(--border);
@@ -237,7 +238,7 @@ body {
 textarea {
     width: 100%;
     min-height: 64px;
-    max-height: 100px;
+    max-height: 200px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
