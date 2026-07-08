@@ -282,8 +282,8 @@ class CninfoAPI:
                     "sortTypes": "-1",
                     "filter": (
                         f'(SECURITY_CODE="{stock_code}")'
-                        f' AND (REPORT_DATE>=\'{year}-01-01\')'
-                        f' AND (REPORT_DATE<=\'{year}-12-31\')'
+                        f'(REPORT_DATE>=\'{year}-01-01\')'
+                        f'(REPORT_DATE<=\'{year}-12-31\')'
                     ),
                 }
 

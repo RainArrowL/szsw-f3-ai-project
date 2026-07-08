@@ -714,27 +714,57 @@ class FinancialDataFetcher:
             logger.info(f"正在获取 {stock_code or org_id} 的{cn_name}数据...")
 
             try:
-                # 优先使用新浪财经（免费，科目完整，字段名已是中文）
+                # 策略：合并新浪财经（科目完整，但只返回最近5期） + 东方财富（补充历史年份）
+                all_translated = []
+                got_years = set()
+
                 if not is_non_listed:
                     try:
                         records = self.api.fetch_from_sina(
                             stock_code, report_type, start_year, end_year
                         )
                         if records:
-                            # 新浪财经字段名已是中文，直接通过 _translate_fields 做数值转换
-                            translated = self._translate_fields(
+                            translated_sina = self._translate_fields(
                                 records, report_type, is_eastmoney=False
                             )
-                            result[cn_name] = translated
-                            time.sleep(0.5)
-                            continue
+                            # 记录已经获取到的年份
+                            for rec in translated_sina:
+                                report_date = rec.get("报告期", "")
+                                if report_date:
+                                    try:
+                                        year = int(str(report_date)[:4])
+                                        if start_year <= year <= end_year:
+                                            got_years.add(year)
+                                    except (ValueError, TypeError):
+                                        pass
+                            all_translated.extend(translated_sina)
+                            logger.info(f"新浪财经获取到 {len(got_years)} 年数据，还需补充...")
                     except Exception as e:
                         logger.warning(
-                            f"新浪财经获取{cn_name}失败({e})，切换到cninfo API..."
+                            f"新浪财经获取{cn_name}失败({e})，尝试合并补充..."
                         )
 
-                # 回退到cninfo API
-                if self._use_cninfo:
+                # 如果新浪财经没有覆盖全部年份，用东方财富补充缺失年份
+                # 遍历所有需要的年份，如果某年份没有数据，尝试从东方财富获取补充
+                missing_years = [y for y in range(start_year, end_year + 1) if y not in got_years]
+                if missing_years and not is_non_listed:
+                    logger.info(f"东方财富补充 {cn_name} 缺失年份: {missing_years}")
+                    try:
+                        for missing_year in missing_years:
+                            records_em = self.api.fetch_from_eastmoney(
+                                stock_code, report_type, missing_year, missing_year
+                            )
+                            if records_em:
+                                translated_em = self._translate_fields(
+                                    records_em, report_type, is_eastmoney=True
+                                )
+                                all_translated.extend(translated_em)
+                            time.sleep(0.3)
+                    except Exception as e:
+                        logger.warning(f"东方财富补充失败: {e}")
+
+                # 如果仍然没有数据，尝试回退到 cninfo API
+                if not all_translated and self._use_cninfo:
                     try:
                         records = self.api.fetch_financial_report(
                             stock_code, report_type, start_date, end_date,
@@ -743,28 +773,33 @@ class FinancialDataFetcher:
                         translated = self._translate_fields(
                             records, report_type, is_eastmoney=False
                         )
-                        result[cn_name] = translated
+                        all_translated.extend(translated)
                         time.sleep(0.5)
-                        continue
                     except Exception as e:
                         logger.warning(
-                            f"cninfo API获取{cn_name}失败({e})，切换到东方财富..."
+                            f"cninfo API获取{cn_name}失败({e})..."
                         )
 
                 # 非上市公司没有免费数据源，跳过
-                if is_non_listed:
+                if not all_translated and is_non_listed:
                     logger.warning(f"非上市公司 {org_id} 无法回退到免费数据源")
                     result[cn_name] = []
                     continue
 
-                # 最后回退到东方财富免费数据源
-                records = self.api.fetch_from_eastmoney(
-                    stock_code, report_type, start_year, end_year
-                )
-                translated = self._translate_fields(
-                    records, report_type, is_eastmoney=True
-                )
-                result[cn_name] = translated
+                # 对最终数据去重（按报告期），保留最新的一份
+                seen_dates = {}
+                final_records = []
+                for rec in all_translated:
+                    report_date = rec.get("报告期", "")
+                    if report_date:
+                        if report_date not in seen_dates:
+                            seen_dates[report_date] = rec
+                            final_records.append(rec)
+                # 按日期排序（旧→新）
+                final_records.sort(key=lambda x: x.get("报告期", ""))
+
+                result[cn_name] = final_records
+                logger.info(f"{cn_name} 最终共 {len(final_records)} 条记录")
 
             except Exception as e:
                 logger.error(f"获取{stock_code or org_id} {cn_name}失败: {e}")
