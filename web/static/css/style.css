@@ -602,7 +602,7 @@ textarea::placeholder {
 .result-card-title {
     font-size: 15px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--accent);
 }
 
 .result-card-badge {
@@ -737,7 +737,7 @@ textarea::placeholder {
     gap: 8px;
     width: 100%;
     padding: 12px;
-    margin-top: 8px;
+    margin: 0 0 12px 0;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: #fff;
     border: none;

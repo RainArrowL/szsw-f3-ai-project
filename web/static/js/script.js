@@ -177,7 +177,7 @@ function setCardDone(card, task) {
         fileList.appendChild(item);
     });
 
-    // 2+文件时加一键下载按钮
+    // 2+文件时加一键下载按钮，放在文件列表上方
     if (task.files.length >= 2) {
         const btn = document.createElement('button');
         btn.className = 'btn-download-all';
@@ -219,7 +219,7 @@ function setCardDone(card, task) {
                 一键下载全部 (${task.files.length}个文件)
             `;
         });
-        fileList.appendChild(btn);
+        card.insertBefore(btn, fileList);
     }
 }
 
