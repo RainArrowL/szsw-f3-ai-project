@@ -166,9 +166,9 @@ body {
 .form-area {
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
+    padding: 14px 24px;
     flex-shrink: 0;
-    height: 150px;
+    height: 210px;
     overflow-y: auto;
 }
 
@@ -207,7 +207,7 @@ body {
 .module-form {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
 }
 
 .form-row-inline {
@@ -239,7 +239,7 @@ body {
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
 /* ========== 自定义下拉选择器 ========== */
@@ -250,7 +250,7 @@ body {
 
 .custom-select-wrap select {
     width: 100%;
-    padding: 9px 30px 9px 12px;
+    padding: 8px 28px 8px 10px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -315,12 +315,12 @@ body {
 /* ========== 文本域 ========== */
 textarea {
     width: 100%;
-    min-height: 64px;
-    max-height: 80px;
+    min-height: 56px;
+    max-height: 72px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 10px 12px;
+    padding: 8px 10px;
     color: var(--text-primary);
     font-size: 13px;
     font-family: inherit;
@@ -349,12 +349,12 @@ textarea::placeholder {
     position: relative;
     border: 2px dashed var(--border);
     border-radius: var(--radius);
-    padding: 14px;
+    padding: 10px;
     text-align: center;
     background: transparent;
     cursor: pointer;
     transition: all var(--transition);
-    min-height: 64px;
+    min-height: 56px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -486,15 +486,15 @@ textarea::placeholder {
 .toggle-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
-    padding: 4px 0;
+    gap: 12px;
+    padding: 2px 0;
 }
 
 .toggle-inline-vertical {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 14px;
+    padding: 6px 12px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -518,7 +518,7 @@ textarea::placeholder {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding-top: 4px;
+    padding-top: 2px;
 }
 
 .btn-primary {
