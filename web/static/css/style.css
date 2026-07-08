@@ -168,6 +168,7 @@ body {
     border-bottom: 1px solid var(--border);
     padding: 16px 24px;
     flex-shrink: 0;
+    height: 150px;
     overflow-y: auto;
 }
 

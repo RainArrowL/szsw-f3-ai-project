@@ -201,7 +201,14 @@ function setCardDone(card, task) {
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = '';
+                    // 从 Content-Disposition header 提取文件名
+                    const disposition = resp.headers.get('Content-Disposition');
+                    if (disposition) {
+                        const match = disposition.match(/filename\*?=(?:UTF-8''|"([^"]+)"|([^;]+))/);
+                        a.download = match ? decodeURIComponent(match[1] || match[2] || 'download.zip') : 'download.zip';
+                    } else {
+                        a.download = 'download.zip';
+                    }
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
