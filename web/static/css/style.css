@@ -174,10 +174,27 @@ body {
 
 .form-panel {
     display: none;
+    position: relative;
 }
 
 .form-panel.active {
     display: block;
+}
+
+.module-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 40px;
+}
+
+.form-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 /* 结果面板 */
@@ -514,12 +531,6 @@ textarea::placeholder {
 }
 
 /* ========== 按钮 ========== */
-.form-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding-top: 2px;
-}
 
 .btn-primary {
     display: inline-flex;
