@@ -269,38 +269,48 @@ class CninfoAPI:
         else:
             market_code = "SH"
 
-        symbol = f"{market_code}{stock_code}"
-
         all_records = []
         for year in range(start_year, end_year + 1):
-            params = {
-                "reportName": report_name,
-                "columns": "ALL",
-                "pageSize": 50,
-                "pageNumber": 1,
-                "sortColumns": "NOTICE_DATE",
-                "sortTypes": "-1",
-                "filter": (
-                    f'(SECURITY_CODE="{stock_code}")'
-                    f'(REPORT_DATE>=\'{year}-01-01\')'
-                    f'(REPORT_DATE<=\'{year}-12-31\')'
-                ),
-            }
+            page = 1
+            while True:
+                params = {
+                    "reportName": report_name,
+                    "columns": "ALL",
+                    "pageSize": 50,
+                    "pageNumber": page,
+                    "sortColumns": "NOTICE_DATE",
+                    "sortTypes": "-1",
+                    "filter": (
+                        f'(SECURITY_CODE="{stock_code}")'
+                        f' AND (REPORT_DATE>=\'{year}-01-01\')'
+                        f' AND (REPORT_DATE<=\'{year}-12-31\')'
+                    ),
+                }
 
-            try:
-                resp = self.session.get(
-                    self.EASTMONEY_BALANCE,
-                    params=params,
-                    timeout=self.timeout,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("success") and data.get("result"):
-                        records = data["result"].get("data", [])
-                        all_records.extend(records)
-                time.sleep(0.5)
-            except Exception as e:
-                logger.warning(f"东方财富数据获取失败({symbol} {year}): {e}")
+                try:
+                    resp = self.session.get(
+                        self.EASTMONEY_BALANCE,
+                        params=params,
+                        timeout=self.timeout,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("success") and data.get("result"):
+                            records = data["result"].get("data", [])
+                            all_records.extend(records)
+                            total_pages = data["result"].get("pages", 1)
+                            if page >= total_pages:
+                                break
+                        else:
+                            break
+                    else:
+                        break
+                    time.sleep(0.3)
+                except Exception as e:
+                    logger.warning(f"东方财富数据获取失败({stock_code} {year} 第{page}页): {e}")
+                    break
+                page += 1
+            time.sleep(0.3)
 
         logger.info(f"东方财富获取 {stock_code} {report_type}: {len(all_records)} 条")
         return all_records
