@@ -36,13 +36,13 @@ body {
 
 /* ========== 顶部标题栏 ========== */
 .header {
-    height: 48px;
+    height: 56px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 0 24px;
     flex-shrink: 0;
     z-index: 10;
 }
@@ -50,19 +50,21 @@ body {
 .header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     color: var(--accent);
 }
 
 .header-left h1 {
     font-family: 'Orbitron', sans-serif;
-    font-size: 17px;
+    font-size: 22px;
     font-weight: 700;
+    letter-spacing: 6px;
 }
 
 .header-sub {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 400;
 }
 
 /* ========== 标签栏 ========== */
