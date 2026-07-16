@@ -260,13 +260,14 @@ def download_all_stats(output_dir: str = "output") -> str:
         logger.warning("没有成功下载任何统计数据文件")
         return ""
 
-    # 去重：同名文件只保留最新一期（按原始文件名排序，后面的覆盖前面的）
+    # 去重：同名文件只保留最新一期（NFRA API 返回最新在前，保留首次出现的）
     deduped = {}
     for name, data in all_files:
         normalized = _normalize_filename(name)
         if normalized in deduped:
-            logger.info(f"去重: 替换旧版 {deduped[normalized][0]} -> {name}")
-        deduped[normalized] = (name, data)
+            logger.info(f"去重: 跳过旧版 {name}，保留 {deduped[normalized][0]}")
+        else:
+            deduped[normalized] = (name, data)
 
     logger.info(f"去重后: {len(all_files)} -> {len(deduped)} 个文件")
 
