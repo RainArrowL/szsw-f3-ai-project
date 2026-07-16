@@ -496,11 +496,17 @@ class CninfoAPI:
         if not func:
             raise ValueError(f"不支持的报表类型: {report_type}")
 
+        # AKShare 同花顺接口仅支持 A 股（6位代码），港股等直接跳过
+        if len(stock_code) != 6 or not stock_code.isdigit():
+            logger.info(f"AKShare 跳过非A股代码: {stock_code}，使用其他数据源")
+            return []
+
         try:
             # AKShare 接口：按年度获取
+            # 注意：同花顺接口仅支持 A 股，港股/非A股会返回空或报错
             df = func(symbol=stock_code, indicator="按年度")
             if df is None or df.empty:
-                logger.warning(f"AKShare 返回空数据: {stock_code} {report_type}")
+                logger.warning(f"AKShare 返回空数据: {stock_code} {report_type}，回退到其他数据源")
                 return []
 
             # 将 DataFrame 转换为字典列表
