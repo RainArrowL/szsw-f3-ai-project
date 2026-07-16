@@ -179,16 +179,34 @@ def _download_csrc_page_stats(page_url: str, page_name: str) -> List[Tuple[str, 
 
 
 def _normalize_filename(name: str) -> str:
-    """规范化文件名，移除 yyyy年mm月 等日期后缀，用于去重匹配"""
+    """规范化文件名，用于去重匹配
+
+    移除以下内容后认定为同名文件：
+    1. 最后一个 _ 及之后的内容（如 _2025年06月）
+    2. 残余的 yyyy年mm月(dd日) 等日期后缀
+    """
     base = name.rsplit(".", 1)[0] if "." in name else name
     ext = name.rsplit(".", 1)[1] if "." in name else ""
-    # 移除常见日期格式：yyyy年mm月、yyyy年mm月dd日、yyyy年 等
-    cleaned = re.sub(r'\d{4}年\d{1,2}月\d{0,2}日?', '', base)
-    cleaned = re.sub(r'\d{4}年', '', cleaned)
-    cleaned = cleaned.strip("_ -（）()")
+    # 1. 移除最后一个 _ 及之后的内容（处理 _2025年06月 等版本后缀）
+    last_underscore = base.rfind("_")
+    if last_underscore >= 0:
+        base = base[:last_underscore]
+    # 2. 移除残余日期格式（处理没有 _ 分隔的日期）
+    base = re.sub(r'\d{4}年\d{1,2}月\d{0,2}日?', '', base)
+    base = re.sub(r'\d{4}年', '', base)
+    base = base.strip("_ -（）()")
     if ext:
-        return f"{cleaned}.{ext}"
-    return cleaned
+        return f"{base}.{ext}"
+    return base
+
+
+def _sheet_name_from_filename(name: str) -> str:
+    """从文件名生成 sheet 名，删除最后一个 _ 及之后的内容，限制31字符"""
+    base = name.rsplit(".", 1)[0] if "." in name else name
+    last_underscore = base.rfind("_")
+    if last_underscore >= 0:
+        base = base[:last_underscore]
+    return base.strip("_ -（）()")[:31]
 
 
 def download_all_stats(output_dir: str = "output") -> str:
@@ -290,7 +308,7 @@ def download_all_stats(output_dir: str = "output") -> str:
                 wb_src = load_workbook(BytesIO(data), read_only=True, data_only=True)
                 ws_src = wb_src.active
 
-                sheet_name = name.replace(".xlsx", "")[:31]
+                sheet_name = _sheet_name_from_filename(name)
                 ws_out = wb_out.create_sheet(title=sheet_name)
 
                 for row_idx in range(1, ws_src.max_row + 1):
@@ -308,7 +326,7 @@ def download_all_stats(output_dir: str = "output") -> str:
                 wb_src = xlrd.open_workbook(file_contents=data)
                 ws_src = wb_src.sheet_by_index(0)
 
-                sheet_name = name.replace(".xls", "")[:31]
+                sheet_name = _sheet_name_from_filename(name)
                 ws_out = wb_out.create_sheet(title=sheet_name)
 
                 for r in range(ws_src.nrows):
