@@ -55,13 +55,19 @@ NFRA_BANK_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.h
 # NFRA 保险法人机构列表 PDF 搜索关键词
 NFRA_INSURANCE_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.html"
 
-# NFRA 已知的银行/保险机构名单 PDF 页面 (通过搜索接口获取)
+# NFRA API 接口
 NFRA_SEARCH_API = "https://www.nfra.gov.cn/cn/search/Search.json"
 NFRA_DOC_LIST_API = "https://www.nfra.gov.cn/cbircweb/DocInfo/SelectDocByItemIdAndChild"
 NFRA_DOC_DETAIL_API = "https://www.nfra.gov.cn/cbircweb/DocInfo/SelectByDocId"
 NFRA_BANK_ITEM_ID = "863"  # 银行业金融机构法人名单栏目ID
 NFRA_BANK_KEYWORD = "银行业金融机构法人名单"
 NFRA_INSURANCE_KEYWORD = "保险机构法人名单"
+
+# NFRA 固定 docId 兜底 (搜索失败时使用)
+NFRA_FALLBACK_DOC_IDS = {
+    NFRA_BANK_KEYWORD: "1228300",       # 银行业金融机构法人名单
+    NFRA_INSURANCE_KEYWORD: "1228292",  # 保险机构法人名单
+}
 
 # CSRC 机构名录 Excel 下载地址
 CSRC_SECURITIES_LIST_URL = "http://www.csrc.gov.cn/csrc/c100028/common_list.shtml"
@@ -77,7 +83,9 @@ def _safe_request(url: str, params: dict = None, stream: bool = False,
                   timeout: int = 30, **kwargs) -> Optional[requests.Response]:
     """发送 HTTP 请求，统一错误处理"""
     try:
-        resp = requests.get(url, params=params, headers=HEADERS,
+        # 允许调用方通过 kwargs 覆盖 headers
+        req_headers = kwargs.pop("headers", HEADERS)
+        resp = requests.get(url, params=params, headers=req_headers,
                             timeout=timeout, stream=stream, **kwargs)
         return resp
     except requests.RequestException as e:
@@ -641,19 +649,26 @@ def download_nfra_pdfs(output_dir: str = "output") -> List[str]:
         try:
             logger.info(f"正在搜索 NFRA: {keyword}")
 
-            # 搜索公告
+            # 1. 优先搜索公告
             detail_url = _fetch_nfra_search(keyword)
-            if not detail_url:
-                logger.warning(f"NFRA 搜索无结果: {keyword}")
-                continue
 
-            # 从详情页获取 PDF 链接
+            # 2. 搜索失败时使用固定 docId 兜底
+            if not detail_url:
+                fallback_doc_id = NFRA_FALLBACK_DOC_IDS.get(keyword)
+                if fallback_doc_id:
+                    detail_url = f"{NFRA_BANK_SEARCH_URL}?docId={fallback_doc_id}&itemId={NFRA_BANK_ITEM_ID}&generaltype=1"
+                    logger.info(f"NFRA 搜索 [{keyword}] 无结果，使用固定链接: {detail_url}")
+                else:
+                    logger.warning(f"NFRA 搜索无结果且无兜底: {keyword}")
+                    continue
+
+            # 3. 从详情页/API 获取 PDF 链接
             pdf_urls = _find_pdf_links_on_page(detail_url)
             if not pdf_urls:
                 logger.warning(f"NFRA 详情页未找到 PDF 链接: {detail_url}")
                 continue
 
-            # 下载找到的 PDF（取第一个）
+            # 4. 下载找到的 PDF（取第一个匹配的）
             pdf_url = pdf_urls[0]
             filename = pdf_url.split("/")[-1].split("?")[0]
             if not filename.endswith(".pdf"):
