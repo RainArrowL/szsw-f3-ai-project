@@ -178,15 +178,30 @@ def _download_csrc_page_stats(page_url: str, page_name: str) -> List[Tuple[str, 
     return results
 
 
+def _normalize_filename(name: str) -> str:
+    """规范化文件名，移除 yyyy年mm月 等日期后缀，用于去重匹配"""
+    base = name.rsplit(".", 1)[0] if "." in name else name
+    ext = name.rsplit(".", 1)[1] if "." in name else ""
+    # 移除常见日期格式：yyyy年mm月、yyyy年mm月dd日、yyyy年 等
+    cleaned = re.sub(r'\d{4}年\d{1,2}月\d{0,2}日?', '', base)
+    cleaned = re.sub(r'\d{4}年', '', cleaned)
+    cleaned = cleaned.strip("_ -（）()")
+    if ext:
+        return f"{cleaned}.{ext}"
+    return cleaned
+
+
 def download_all_stats(output_dir: str = "output") -> str:
     """下载所有统计信息，合并为一个Excel文件
+
+    - 同名文件只保留最新一期（忽略 yyyy年mm月 后缀）
+    - Word/doc 文件直接保存为原文件，不整合进 Excel
 
     Returns:
         合并后的xlsx文件路径，失败返回空字符串
     """
     from io import BytesIO
     from openpyxl import Workbook
-    from openpyxl.utils import get_column_letter
     from copy import copy
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -227,11 +242,45 @@ def download_all_stats(output_dir: str = "output") -> str:
         logger.warning("没有成功下载任何统计数据文件")
         return ""
 
-    # 合并到一个Excel
+    # 去重：同名文件只保留最新一期（按原始文件名排序，后面的覆盖前面的）
+    deduped = {}
+    for name, data in all_files:
+        normalized = _normalize_filename(name)
+        if normalized in deduped:
+            logger.info(f"去重: 替换旧版 {deduped[normalized][0]} -> {name}")
+        deduped[normalized] = (name, data)
+
+    logger.info(f"去重后: {len(all_files)} -> {len(deduped)} 个文件")
+
+    # 分离 Word 文件和 Excel 文件
+    word_files = []
+    excel_files = []
+    for normalized, (name, data) in deduped.items():
+        ext = name.split(".")[-1].lower() if "." in name else "xlsx"
+        if ext in ("docx", "doc"):
+            word_files.append((name, data))
+        else:
+            excel_files.append((name, data))
+
+    # Word 文件直接保存为原文件
+    for name, data in word_files:
+        filepath = str(Path(output_dir) / name)
+        try:
+            with open(filepath, "wb") as f:
+                f.write(data)
+            logger.info(f"Word 文件已保存: {filepath}")
+        except Exception as e:
+            logger.warning(f"Word 文件保存失败 {name}: {e}")
+
+    # Excel 文件合并
+    if not excel_files:
+        logger.warning("没有需要合并的 Excel 文件")
+        return ""
+
     wb_out = Workbook()
     wb_out.remove(wb_out.active)
 
-    for name, data in all_files:
+    for name, data in excel_files:
         try:
             ext = name.split(".")[-1].lower() if "." in name else "xlsx"
 
@@ -268,34 +317,6 @@ def download_all_stats(output_dir: str = "output") -> str:
                         ws_out.cell(row=r + 1, column=c + 1, value=cell_value if cell_value != "" else None)
 
                 logger.info(f"已合并: {sheet_name} ({ws_src.nrows}行)")
-
-            elif ext in ("docx", "doc"):
-                sheet_name = name.rsplit(".", 1)[0][:31]
-                try:
-                    from docx import Document
-                    doc = Document(BytesIO(data))
-                    ws_out = wb_out.create_sheet(title=sheet_name)
-
-                    row_idx = 1
-                    for para in doc.paragraphs:
-                        text = para.text.strip()
-                        if text:
-                            ws_out.cell(row=row_idx, column=1, value=text)
-                            row_idx += 1
-
-                    for table in doc.tables:
-                        for i, row in enumerate(table.rows):
-                            for j, cell in enumerate(row.cells):
-                                ws_out.cell(row=row_idx + i, column=j + 1, value=cell.text.strip())
-                        row_idx += len(table.rows)
-
-                    logger.info(f"已合并: {sheet_name} ({row_idx - 1}行)")
-                except Exception:
-                    # python-docx 不支持旧格式 .doc，保存提示
-                    ws_out = wb_out.create_sheet(title=sheet_name)
-                    ws_out.cell(row=1, column=1, value=f"无法解析旧格式 .doc 文件: {name}")
-                    ws_out.cell(row=2, column=1, value=f"文件大小: {len(data)} bytes")
-                    logger.info(f"已添加提示Sheet: {sheet_name} (旧格式 .doc，无法解析)")
 
         except Exception as e:
             logger.warning(f"合并文件失败 {name}: {e}")

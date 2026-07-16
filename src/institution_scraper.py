@@ -20,6 +20,7 @@ import re
 import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from urllib.parse import urljoin, urlparse, parse_qs
 
 import requests
 from openpyxl import Workbook
@@ -50,12 +51,15 @@ AMAC_FIELD_CN = {
 }
 
 # NFRA 银行法人机构列表 PDF 搜索关键词
-NFRA_BANK_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/govermentDetail.html"
+NFRA_BANK_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.html"
 # NFRA 保险法人机构列表 PDF 搜索关键词
-NFRA_INSURANCE_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/govermentDetail.html"
+NFRA_INSURANCE_SEARCH_URL = "https://www.nfra.gov.cn/cn/view/pages/governmentDetail.html"
 
 # NFRA 已知的银行/保险机构名单 PDF 页面 (通过搜索接口获取)
 NFRA_SEARCH_API = "https://www.nfra.gov.cn/cn/search/Search.json"
+NFRA_DOC_LIST_API = "https://www.nfra.gov.cn/cbircweb/DocInfo/SelectDocByItemIdAndChild"
+NFRA_DOC_DETAIL_API = "https://www.nfra.gov.cn/cbircweb/DocInfo/SelectByDocId"
+NFRA_BANK_ITEM_ID = "863"  # 银行业金融机构法人名单栏目ID
 NFRA_BANK_KEYWORD = "银行业金融机构法人名单"
 NFRA_INSURANCE_KEYWORD = "保险机构法人名单"
 
@@ -128,36 +132,43 @@ def _fetch_amac() -> Optional[List[Dict[str, str]]]:
 
 def _fetch_nfra_search(keyword: str) -> Optional[str]:
     """
-    通过 NFRA 搜索接口查找指定关键词的公告页面 URL
+    通过 NFRA 文档列表 API 查找指定关键词的最新公告详情页 URL
 
     返回：
         第一个匹配的公告详情页 URL，失败返回 None
     """
     try:
         params = {
-            "key": keyword,
-            "pageNo": 1,
-            "pageSize": 5,
+            "itemId": NFRA_BANK_ITEM_ID,
+            "pageSize": 20,
+            "pageIndex": 1,
         }
-        resp = _safe_request(NFRA_SEARCH_API, params=params)
+        json_headers = {
+            **HEADERS,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+        }
+        resp = _safe_request(NFRA_DOC_LIST_API, params=params)
         if resp is None:
             return None
 
         body = resp.json()
-        results = body.get("data", {}).get("results", [])
-        if not results:
-            logger.warning(f"NFRA 搜索无结果: {keyword}")
+        rows = body.get("data", {}).get("rows", [])
+        if not rows:
+            logger.warning(f"NFRA 文档列表无结果: {keyword}")
             return None
 
-        # 取第一个结果的 docId 构造详情页 URL
-        first = results[0]
-        doc_id = first.get("docId", "")
-        if not doc_id:
-            return None
+        # 按关键词匹配，取第一个
+        for row in rows:
+            title = row.get("docTitle", "")
+            if keyword in title:
+                doc_id = row.get("docId", "")
+                if doc_id:
+                    detail_url = f"{NFRA_BANK_SEARCH_URL}?docId={doc_id}&itemId={NFRA_BANK_ITEM_ID}"
+                    logger.info(f"NFRA 找到 [{keyword}]: {detail_url}")
+                    return detail_url
 
-        detail_url = f"{NFRA_BANK_SEARCH_URL}?docId={doc_id}"
-        logger.info(f"NFRA 搜索到 [{keyword}]: {detail_url}")
-        return detail_url
+        logger.warning(f"NFRA 文档列表中未找到匹配 [{keyword}] 的文档")
+        return None
 
     except Exception as e:
         logger.error(f"NFRA 搜索失败 [{keyword}]: {e}")
@@ -167,18 +178,50 @@ def _fetch_nfra_search(keyword: str) -> Optional[str]:
 def _find_pdf_links_on_page(page_url: str) -> List[str]:
     """
     从 NFRA 公告详情页中提取 PDF 附件链接
+    优先使用 API 获取附件，失败时回退到 HTML 解析
 
     返回：
         PDF URL 列表
     """
     try:
+        # 从 URL 中提取 docId
+        parsed = urlparse(page_url)
+        params = parse_qs(parsed.query)
+        doc_id = params.get("docId", [None])[0]
+
+        if doc_id:
+            # 优先使用文档详情 API 获取附件信息
+            json_headers = {
+                **HEADERS,
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+            }
+            detail_url = f"{NFRA_DOC_DETAIL_API}?docId={doc_id}"
+            resp = _safe_request(detail_url, headers=json_headers)
+            if resp is not None:
+                try:
+                    body = resp.json()
+                    detail_data = body.get("data", {})
+                    attachments = detail_data.get("attachmentInfoVOList", [])
+                    pdf_urls = []
+                    for att in attachments:
+                        name = att.get("attachmentName", "")
+                        url = att.get("urlOtherName", "")
+                        if url and (name.lower().endswith(".pdf") or url.lower().endswith(".pdf")):
+                            full_url = urljoin("https://www.nfra.gov.cn", url)
+                            if full_url not in pdf_urls:
+                                pdf_urls.append(full_url)
+                    if pdf_urls:
+                        logger.info(f"通过 API 找到 {len(pdf_urls)} 个 PDF 链接")
+                        return pdf_urls
+                except Exception:
+                    logger.warning("API 获取附件失败，回退到 HTML 解析")
+
+        # 回退到 HTML 解析
         resp = _safe_request(page_url)
         if resp is None:
             return []
 
         html = resp.text
-
-        # 匹配各种 PDF 链接模式
         pdf_urls = []
         patterns = [
             r'href=["\']([^"\']*\.pdf[^"\']*)["\']',
@@ -189,18 +232,16 @@ def _find_pdf_links_on_page(page_url: str) -> List[str]:
         for pattern in patterns:
             matches = re.findall(pattern, html, re.IGNORECASE)
             for match in matches:
-                # 处理相对路径
                 if match.startswith("//"):
                     match = "https:" + match
                 elif match.startswith("/"):
                     match = "https://www.nfra.gov.cn" + match
                 elif not match.startswith("http"):
                     continue
-
                 if match not in pdf_urls:
                     pdf_urls.append(match)
 
-        logger.info(f"在页面中找到 {len(pdf_urls)} 个 PDF 链接")
+        logger.info(f"通过 HTML 找到 {len(pdf_urls)} 个 PDF 链接")
         return pdf_urls
 
     except Exception as e:

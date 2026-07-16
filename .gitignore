@@ -225,3 +225,6 @@ output/
 
 # Windows embedded Python runtime
 python/
+
+# Offline packages (large files, excluded from repo)
+offline/
