@@ -390,10 +390,14 @@ textarea::placeholder { color: var(--text-secondary); opacity: 0.6; }
 .result-card {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
     border-radius: 12px;
     padding: 20px;
     margin-bottom: 14px;
+    transition: border-color 0.3s ease;
 }
+.result-card.success { border-color: var(--success); border-left-color: var(--success); }
+.result-card.error   { border-color: var(--error);   border-left-color: var(--error); }
 
 .result-card-header {
     display: flex; justify-content: space-between; align-items: center;

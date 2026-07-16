@@ -155,6 +155,8 @@ function setCardDone(card, task) {
     badge.className = 'result-card-badge success';
     badge.textContent = '完成';
 
+    card.classList.add('success');
+
     card.querySelector('.progress-section').style.display = 'none';
 
     const fileList = card.querySelector('.file-list');
@@ -234,6 +236,8 @@ function setCardError(card, message) {
     const badge = card.querySelector('.result-card-badge');
     badge.className = 'result-card-badge error';
     badge.textContent = '失败';
+
+    card.classList.add('error');
 
     card.querySelector('.progress-section').style.display = 'none';
     card.querySelector('.progress-message').textContent = '错误: ' + message;
